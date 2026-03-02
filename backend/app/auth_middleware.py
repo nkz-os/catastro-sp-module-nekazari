@@ -17,23 +17,30 @@ logger = logging.getLogger(__name__)
 TRUST_API_GATEWAY = os.getenv('TRUST_API_GATEWAY', 'true').lower() == 'true'
 
 
+def get_request_token():
+    """Extract JWT token from Authorization header or httpOnly cookie (fallback)."""
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        return auth_header.split(' ')[1]
+    return request.cookies.get('nkz_token')
+
+
 def require_auth(f):
     """
     Simple authentication decorator for Flask routes.
-    
+
     Trusts API Gateway validation:
     - If X-Tenant-ID header is present, uses it (API Gateway already validated)
     - Only decodes token to extract user info (no signature verification)
     - Stores user info in Flask g for access in route handlers
+    - Reads token from Authorization header or httpOnly cookie (fallback)
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Get token from Authorization header
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
+        # Get token from Authorization header or httpOnly cookie
+        token = get_request_token()
+        if not token:
             return jsonify({'error': 'Missing or invalid authorization header'}), 401
-        
-        token = auth_header.split(' ')[1]
         
         # Get tenant from X-Tenant-ID header (set by API Gateway)
         tenant_id = request.headers.get('X-Tenant-ID')
