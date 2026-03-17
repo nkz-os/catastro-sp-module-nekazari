@@ -75,6 +75,7 @@ export const CadastralMapClickHandler: React.FC = () => {
   const handlerRef = useRef<any>(null);
   const notificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const confirmingRef = useRef(false);
 
   // Only activate on /entities page
   const isEntitiesPage = location.pathname === '/entities';
@@ -399,7 +400,8 @@ export const CadastralMapClickHandler: React.FC = () => {
   };
 
   const handleConfirmParcel = async () => {
-    if (!pendingParcel) return;
+    if (!pendingParcel || confirmingRef.current) return;
+    confirmingRef.current = true;
 
     setIsProcessing(true);
     setPendingParcel(null);
@@ -429,10 +431,10 @@ export const CadastralMapClickHandler: React.FC = () => {
 
       clearNotificationAfterDelay();
 
-      // Reload entities in the viewer after a short delay
+      // Signal host to reload entities
       setTimeout(() => {
-        viewerContext?.loadAllEntities?.();
-      }, 1500);
+        (viewerContext as any)?.triggerEntityRefresh?.();
+      }, 500);
     } catch (error: any) {
       console.error('[CadastralMapClickHandler] Error creating parcel:', error);
       const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message || 'Error al crear la parcela';
@@ -443,6 +445,7 @@ export const CadastralMapClickHandler: React.FC = () => {
       clearNotificationAfterDelay();
     } finally {
       setIsProcessing(false);
+      confirmingRef.current = false;
     }
   };
 
