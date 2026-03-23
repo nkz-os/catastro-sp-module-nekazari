@@ -1,4 +1,5 @@
 FROM python:3.11-alpine
+LABEL org.opencontainers.image.source=https://github.com/nkz-os/catastro-sp-module-nekazari
 
 WORKDIR /app
 
