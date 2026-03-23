@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: ghcr.io/k8-benetis/catastro-sp-module-nekazari/catastro-frontend-auto:latest
+          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-frontend-auto:latest
           imagePullPolicy: Always
           ports:
             - name: http
