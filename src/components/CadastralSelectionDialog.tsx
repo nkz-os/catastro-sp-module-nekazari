@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, MapPin, Building, LandPlot, ArrowRight, Layers } from 'lucide-react';
+import { useTranslation } from '@nekazari/sdk';
 import { CadastralData } from '../services/cadastralApi';
 
 interface CadastralSelectionDialogProps {
@@ -13,6 +14,7 @@ export const CadastralSelectionDialog: React.FC<CadastralSelectionDialogProps> =
     onSelect,
     onCancel,
 }) => {
+    const { t } = useTranslation('cadastral');
 
     // Helper to determine icon based on type or content
     const getIcon = (candidate: CadastralData) => {
@@ -28,7 +30,7 @@ export const CadastralSelectionDialog: React.FC<CadastralSelectionDialogProps> =
 
     // Helper to format type name
     const formatType = (candidate: CadastralData) => {
-        if (!candidate.type) return 'Entidad Catastral';
+        if (!candidate.type) return t('dialogs.cadastralEntity');
         // Remove "IDENA:" prefix if present and format
         const clean = candidate.type.replace(/^.*:/, '').replace(/_/g, ' ');
         return clean.charAt(0).toUpperCase() + clean.slice(1);
@@ -42,14 +44,14 @@ export const CadastralSelectionDialog: React.FC<CadastralSelectionDialogProps> =
                     <div className="flex items-center gap-3">
                         <Layers className="w-5 h-5 text-white" />
                         <div>
-                            <h3 className="text-lg font-semibold text-white">Múltiples Resultados</h3>
-                            <p className="text-xs text-blue-100">Seleccione la entidad que desea importar</p>
+                            <h3 className="text-lg font-semibold text-white">{t('dialogs.multipleTitle')}</h3>
+                            <p className="text-xs text-blue-100">{t('dialogs.multipleSubtitle')}</p>
                         </div>
                     </div>
                     <button
                         onClick={onCancel}
                         className="text-white hover:text-blue-100 transition-colors"
-                        aria-label="Cerrar"
+                        aria-label={t('dialogs.close')}
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -87,7 +89,7 @@ export const CadastralSelectionDialog: React.FC<CadastralSelectionDialogProps> =
                                     <div className="flex items-center gap-1 text-xs text-gray-600 truncate">
                                         <MapPin className="w-3 h-3 flex-shrink-0" />
                                         <span className="truncate">
-                                            {candidate.address || candidate.municipality || 'Sin dirección'}
+                                            {candidate.address || candidate.municipality || t('dialogs.noAddress')}
                                         </span>
                                     </div>
                                 </div>
@@ -102,7 +104,7 @@ export const CadastralSelectionDialog: React.FC<CadastralSelectionDialogProps> =
 
                 {/* Footer */}
                 <div className="px-6 py-3 bg-gray-50 border-t border-gray-200 text-xs text-center text-gray-500 flex-shrink-0">
-                    Se han encontrado {candidates.length} entidades en esta ubicación
+                    {t('dialogs.foundCount', { count: candidates.length })}
                 </div>
             </div>
         </div>
