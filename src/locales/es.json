@@ -1,0 +1,69 @@
+{
+  "app": {
+    "title": "Catastro España",
+    "subtitle": "Integración con el Catastro Español para Nekazari"
+  },
+  "info": {
+    "activeTitle": "Módulo de catastro activo",
+    "activeDesc": "Este módulo permite añadir parcelas catastrales con un solo clic desde la página de entidades. Haz clic en el mapa para consultar el catastro y añadir la parcela automáticamente.",
+    "featuresTitle": "Funcionalidades",
+    "features": {
+      "byCoords": "Consulta de parcelas por coordenadas",
+      "oneClick": "Añadir parcelas con un solo clic en el mapa",
+      "regions": "Soporte para múltiples regiones (España, Navarra, Euskadi)",
+      "syncOrion": "Sincronización automática con Orion-LD"
+    },
+    "authenticatedAs": "Autenticado como",
+    "tenant": "Tenant"
+  },
+  "geosearch": {
+    "searchLocation": "Buscar ubicación",
+    "placeholder": "Buscar ciudad, provincia o CP...",
+    "close": "Cerrar buscador",
+    "typeBadge": {
+      "postcode": "CP",
+      "city": "Ciudad",
+      "town": "Ciudad",
+      "village": "Pueblo",
+      "municipality": "Municipio",
+      "county": "Comarca",
+      "state": "Provincia",
+      "region": "Región",
+      "place": "Lugar"
+    }
+  },
+  "dialogs": {
+    "foundTitle": "Parcela catastral encontrada",
+    "cadastralEntity": "Entidad catastral",
+    "multipleTitle": "Múltiples resultados",
+    "multipleSubtitle": "Selecciona la entidad que deseas importar",
+    "close": "Cerrar",
+    "cadastralRef": "Referencia catastral",
+    "municipality": "Municipio",
+    "province": "Provincia",
+    "address": "Dirección",
+    "area": "Superficie",
+    "cancel": "Cancelar",
+    "addParcel": "Añadir parcela",
+    "adding": "Añadiendo parcela...",
+    "noAddress": "Sin dirección",
+    "foundCount": "Se han encontrado {{count}} entidades en esta ubicación"
+  },
+  "status": {
+    "querying": "Consultando catastro...",
+    "slowService": "El servicio está tardando más de lo habitual",
+    "createParcelError": "Error al crear la parcela",
+    "parcelCreated": "Parcela {{ref}} añadida correctamente ({{area}} ha)",
+    "defaultParcelName": "Parcela {{municipality}}"
+  },
+  "warnings": {
+    "noGeometry": "La entidad seleccionada no tiene geometría disponible para esta operación."
+  },
+  "errors": {
+    "timeout": "El servicio catastral está tardando más de lo habitual. Por favor, inténtalo de nuevo.",
+    "network": "Sin conexión a internet. Por favor, verifica tu conexión.",
+    "notFound": "No se encontró información catastral para esta ubicación.",
+    "serviceUnavailable": "El servicio catastral no está disponible temporalmente. Inténtalo más tarde.",
+    "generic": "Error al procesar la parcela"
+  }
+}

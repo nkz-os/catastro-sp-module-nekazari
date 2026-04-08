@@ -1,0 +1,69 @@
+{
+  "app": {
+    "title": "Spain Cadastre",
+    "subtitle": "Integration with the Spanish Cadastre for Nekazari"
+  },
+  "info": {
+    "activeTitle": "Cadastre module active",
+    "activeDesc": "This module lets you add cadastral parcels with a single click from the entities page. Click on the map to query the cadastre and automatically add the parcel.",
+    "featuresTitle": "Features",
+    "features": {
+      "byCoords": "Query parcels by coordinates",
+      "oneClick": "Add parcels with one click on the map",
+      "regions": "Support for multiple regions (Spain, Navarra, Basque Country)",
+      "syncOrion": "Automatic synchronization with Orion-LD"
+    },
+    "authenticatedAs": "Authenticated as",
+    "tenant": "Tenant"
+  },
+  "geosearch": {
+    "searchLocation": "Search location",
+    "placeholder": "Search city, province or postal code...",
+    "close": "Close search",
+    "typeBadge": {
+      "postcode": "PC",
+      "city": "City",
+      "town": "Town",
+      "village": "Village",
+      "municipality": "Municipality",
+      "county": "County",
+      "state": "Province",
+      "region": "Region",
+      "place": "Place"
+    }
+  },
+  "dialogs": {
+    "foundTitle": "Cadastral parcel found",
+    "cadastralEntity": "Cadastral entity",
+    "multipleTitle": "Multiple results",
+    "multipleSubtitle": "Select the entity you want to import",
+    "close": "Close",
+    "cadastralRef": "Cadastral reference",
+    "municipality": "Municipality",
+    "province": "Province",
+    "address": "Address",
+    "area": "Area",
+    "cancel": "Cancel",
+    "addParcel": "Add parcel",
+    "adding": "Adding parcel...",
+    "noAddress": "No address",
+    "foundCount": "{{count}} entities found at this location"
+  },
+  "status": {
+    "querying": "Querying cadastre...",
+    "slowService": "The service is taking longer than usual",
+    "createParcelError": "Error creating parcel",
+    "parcelCreated": "Parcel {{ref}} added successfully ({{area}} ha)",
+    "defaultParcelName": "Parcel {{municipality}}"
+  },
+  "warnings": {
+    "noGeometry": "The selected entity has no geometry available for this operation."
+  },
+  "errors": {
+    "timeout": "The cadastral service is taking longer than usual. Please try again.",
+    "network": "No internet connection. Please check your connection.",
+    "notFound": "No cadastral information was found for this location.",
+    "serviceUnavailable": "The cadastral service is temporarily unavailable. Please try again later.",
+    "generic": "Error processing parcel"
+  }
+}

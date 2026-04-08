@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, MapPin, X, Loader2 } from 'lucide-react';
 import { useViewerOptional } from '@nekazari/sdk';
+import { useTranslation } from '@nekazari/sdk';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,16 +32,16 @@ interface NominatimResult {
 // ---------------------------------------------------------------------------
 
 /** Get a human-friendly type badge for the result */
-const getTypeBadge = (result: NominatimResult): string => {
+const getTypeBadge = (result: NominatimResult, t: (key: string) => string): string => {
     const addr = result.address;
-    if (addr?.postcode && result.class === 'place') return 'CP';
-    if (addr?.city || addr?.town) return 'Ciudad';
-    if (addr?.village) return 'Pueblo';
-    if (addr?.municipality) return 'Municipio';
-    if (addr?.county) return 'Comarca';
-    if (addr?.state) return 'Provincia';
-    if (result.type === 'administrative') return 'Región';
-    return 'Lugar';
+    if (addr?.postcode && result.class === 'place') return t('geosearch.typeBadge.postcode');
+    if (addr?.city || addr?.town) return t('geosearch.typeBadge.city');
+    if (addr?.village) return t('geosearch.typeBadge.village');
+    if (addr?.municipality) return t('geosearch.typeBadge.municipality');
+    if (addr?.county) return t('geosearch.typeBadge.county');
+    if (addr?.state) return t('geosearch.typeBadge.state');
+    if (result.type === 'administrative') return t('geosearch.typeBadge.region');
+    return t('geosearch.typeBadge.place');
 };
 
 /** Get the short display name (city + province) instead of the full Nominatim string */
@@ -72,6 +73,7 @@ const getShortName = (result: NominatimResult): string => {
  * Rendered via the `map-layer` slot of the catastro-spain module.
  */
 export const GeoSearchBar: React.FC = () => {
+    const { t } = useTranslation('cadastral');
     const viewerContext = useViewerOptional();
     const cesiumViewer = viewerContext?.cesiumViewer;
 
@@ -238,7 +240,7 @@ export const GeoSearchBar: React.FC = () => {
             hover:bg-white hover:text-blue-600 hover:border-blue-300
             transition-all duration-200
           "
-                    title="Buscar ubicación"
+                    title={t('geosearch.searchLocation')}
                 >
                     <Search className="w-5 h-5" />
                 </button>
@@ -273,7 +275,7 @@ export const GeoSearchBar: React.FC = () => {
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Buscar ciudad, provincia o CP..."
+                    placeholder={t('geosearch.placeholder')}
                     className="
             flex-1 bg-transparent
             text-sm text-slate-800
@@ -308,7 +310,7 @@ export const GeoSearchBar: React.FC = () => {
             text-slate-400 hover:text-slate-600 hover:bg-slate-100
             transition-colors
           "
-                    title="Cerrar buscador"
+                    title={t('geosearch.close')}
                 >
                     <X className="w-3.5 h-3.5" />
                 </button>
@@ -362,7 +364,7 @@ export const GeoSearchBar: React.FC = () => {
                                     }
                 `}
                             >
-                                {getTypeBadge(result)}
+                                {getTypeBadge(result, t)}
                             </span>
                         </button>
                     ))}
