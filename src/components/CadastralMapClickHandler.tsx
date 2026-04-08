@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useViewerOptional } from '@nekazari/sdk';
+import { useTranslation } from '@nekazari/sdk';
 import { cadastralApi, CadastralData } from '../services/cadastralApi';
 import { parcelApi } from '../services/parcelApi';
 import { CheckCircle, XCircle, Loader2, Clock } from 'lucide-react';
@@ -11,11 +12,11 @@ import { CadastralSelectionDialog } from './CadastralSelectionDialog';
 // Error types for specific UX messages
 type ErrorType = 'not_found' | 'timeout' | 'network' | 'service_unavailable' | 'generic';
 
-const getErrorMessage = (error: any): { message: string; type: ErrorType } => {
+const getErrorMessage = (error: any, t: (key: string) => string): { message: string; type: ErrorType } => {
   // Check for timeout
   if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
     return {
-      message: 'El servicio catastral está tardando más de lo habitual. Por favor, inténtelo de nuevo.',
+      message: t('errors.timeout'),
       type: 'timeout'
     };
   }
@@ -23,7 +24,7 @@ const getErrorMessage = (error: any): { message: string; type: ErrorType } => {
   // Check for network error
   if (error.code === 'ERR_NETWORK' || !navigator.onLine) {
     return {
-      message: 'Sin conexión a internet. Por favor, verifique su conexión.',
+      message: t('errors.network'),
       type: 'network'
     };
   }
@@ -31,7 +32,7 @@ const getErrorMessage = (error: any): { message: string; type: ErrorType } => {
   // Check for 404 - not found
   if (error.response?.status === 404) {
     return {
-      message: 'No se encontró información catastral para esta ubicación.',
+      message: t('errors.notFound'),
       type: 'not_found'
     };
   }
@@ -39,7 +40,7 @@ const getErrorMessage = (error: any): { message: string; type: ErrorType } => {
   // Check for service unavailable
   if (error.response?.status === 503 || error.response?.status === 502) {
     return {
-      message: 'El servicio catastral no está disponible temporalmente. Inténtelo más tarde.',
+      message: t('errors.serviceUnavailable'),
       type: 'service_unavailable'
     };
   }
@@ -47,7 +48,7 @@ const getErrorMessage = (error: any): { message: string; type: ErrorType } => {
   // Generic error with server message if available
   const serverMessage = error.response?.data?.error || error.response?.data?.message;
   return {
-    message: serverMessage || error.message || 'Error al procesar la parcela',
+    message: serverMessage || error.message || t('errors.generic'),
     type: 'generic'
   };
 };
@@ -58,6 +59,7 @@ const getErrorMessage = (error: any): { message: string; type: ErrorType } => {
  */
 export const CadastralMapClickHandler: React.FC = () => {
   const location = useLocation();
+  const { t } = useTranslation('cadastral');
   const viewerContext = useViewerOptional();
   const cesiumViewer = viewerContext?.cesiumViewer;
   const { isClickEnabled } = useCadastral();
@@ -278,7 +280,7 @@ export const CadastralMapClickHandler: React.FC = () => {
         timerRef.current = null;
       }
 
-      const { message, type } = getErrorMessage(error);
+      const { message, type } = getErrorMessage(error, t);
       setNotification({
         type: type === 'not_found' ? 'warning' : 'error',
         message,
@@ -314,7 +316,7 @@ export const CadastralMapClickHandler: React.FC = () => {
       console.warn('[CadastralMapClickHandler] Parcel missing geometry:', data);
       setNotification({
         type: 'warning',
-        message: `La entidad seleccionada no tiene geometría disponible. (Debug: Type=${data.geometry?.type}, Coords=${data.geometry?.coordinates ? 'Yes' : 'No'})`,
+        message: t('warnings.noGeometry'),
       });
       clearNotificationAfterDelay();
       setIsProcessing(false);
@@ -404,14 +406,17 @@ export const CadastralMapClickHandler: React.FC = () => {
     confirmingRef.current = true;
 
     setIsProcessing(true);
-    setPendingParcel(null);
+    // Keep pendingParcel until creation finishes so CadastralConfirmDialog stays mounted
+    // and map-click guard (pendingParcel | isProcessing) remains effective.
 
     try {
       const { data: cadastralData, area } = pendingParcel;
 
       console.log('[CadastralMapClickHandler] Creating parcel...');
       const newParcel = {
-        name: cadastralData.cadastralReference || `Parcela ${cadastralData.municipality}`,
+        name:
+          cadastralData.cadastralReference ||
+          t('status.defaultParcelName', { municipality: cadastralData.municipality || '' }),
         geometry: cadastralData.geometry!,
         municipality: cadastralData.municipality || '',
         province: cadastralData.province || '',
@@ -424,9 +429,14 @@ export const CadastralMapClickHandler: React.FC = () => {
 
       await parcelApi.createParcel(newParcel);
 
+      setPendingParcel(null);
+
       setNotification({
         type: 'success',
-        message: `Parcela ${cadastralData.cadastralReference} añadida correctamente (${area.toFixed(2)} ha)`,
+        message: t('status.parcelCreated', {
+          ref: cadastralData.cadastralReference,
+          area: area.toFixed(2),
+        }),
       });
 
       clearNotificationAfterDelay();
@@ -437,7 +447,11 @@ export const CadastralMapClickHandler: React.FC = () => {
       }, 500);
     } catch (error: any) {
       console.error('[CadastralMapClickHandler] Error creating parcel:', error);
-      const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message || 'Error al crear la parcela';
+      const errorMessage =
+        error.response?.data?.error ||
+        error.response?.data?.message ||
+        error.message ||
+        t('status.createParcelError');
       setNotification({
         type: 'error',
         message: errorMessage,
@@ -465,12 +479,12 @@ export const CadastralMapClickHandler: React.FC = () => {
         <div className="fixed top-4 right-4 z-50 bg-white rounded-lg shadow-lg border border-gray-200 p-4 flex items-center gap-3 min-w-[300px]">
           <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
           <div className="flex flex-col">
-            <span className="text-sm text-gray-700">Consultando catastro...</span>
+            <span className="text-sm text-gray-700">{t('status.querying')}</span>
             {elapsedSeconds > 0 && (
               <span className="text-xs text-gray-500 flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {elapsedSeconds}s
-                {elapsedSeconds >= 5 && ' - El servicio está tardando más de lo habitual'}
+                {elapsedSeconds >= 5 && ` - ${t('status.slowService')}`}
               </span>
             )}
           </div>
