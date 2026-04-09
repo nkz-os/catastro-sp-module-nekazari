@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { X, MapPin, CheckCircle, XCircle } from 'lucide-react';
 import { useTranslation } from '@nekazari/sdk';
 import { CadastralData } from '../services/cadastralApi';
@@ -19,11 +19,53 @@ export const CadastralConfirmDialog: React.FC<CadastralConfirmDialogProps> = ({
   isProcessing = false,
 }) => {
   const { t } = useTranslation('cadastral');
+  const [position, setPosition] = useState({ x: 24, y: 24 });
+  const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number; active: boolean }>({
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+    active: false,
+  });
+
+  const beginDrag = (clientX: number, clientY: number) => {
+    dragRef.current = {
+      startX: clientX,
+      startY: clientY,
+      originX: position.x,
+      originY: position.y,
+      active: true,
+    };
+  };
+
+  const updateDrag = (clientX: number, clientY: number) => {
+    if (!dragRef.current.active) return;
+    const nextX = Math.max(8, dragRef.current.originX + (clientX - dragRef.current.startX));
+    const nextY = Math.max(8, dragRef.current.originY + (clientY - dragRef.current.startY));
+    setPosition({ x: nextX, y: nextY });
+  };
+
+  const endDrag = () => {
+    dragRef.current.active = false;
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 pointer-events-auto">
-      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+    <div className="fixed inset-0 z-50 pointer-events-none">
+      <div
+        className="pointer-events-auto bg-white rounded-xl shadow-2xl max-w-md w-[calc(100%-2rem)] overflow-hidden"
+        style={{ position: 'absolute', left: `${position.x}px`, top: `${position.y}px` }}
+      >
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4 flex items-center justify-between">
+        <div
+          className="bg-gradient-to-r from-blue-500 to-blue-600 px-6 py-4 flex items-center justify-between cursor-move select-none"
+          onMouseDown={(e) => beginDrag(e.clientX, e.clientY)}
+          onMouseMove={(e) => updateDrag(e.clientX, e.clientY)}
+          onMouseUp={endDrag}
+          onMouseLeave={endDrag}
+          onTouchStart={(e) => beginDrag(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchMove={(e) => updateDrag(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchEnd={endDrag}
+        >
           <div className="flex items-center gap-3">
             <MapPin className="w-5 h-5 text-white" />
             <h3 className="text-lg font-semibold text-white">{t('dialogs.foundTitle')}</h3>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { X, MapPin, Building, LandPlot, ArrowRight, Layers } from 'lucide-react';
 import { useTranslation } from '@nekazari/sdk';
 import { CadastralData } from '../services/cadastralApi';
@@ -15,6 +15,35 @@ export const CadastralSelectionDialog: React.FC<CadastralSelectionDialogProps> =
     onCancel,
 }) => {
     const { t } = useTranslation('cadastral');
+    const [position, setPosition] = useState({ x: 24, y: 24 });
+    const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number; active: boolean }>({
+        startX: 0,
+        startY: 0,
+        originX: 0,
+        originY: 0,
+        active: false,
+    });
+
+    const beginDrag = (clientX: number, clientY: number) => {
+        dragRef.current = {
+            startX: clientX,
+            startY: clientY,
+            originX: position.x,
+            originY: position.y,
+            active: true,
+        };
+    };
+
+    const updateDrag = (clientX: number, clientY: number) => {
+        if (!dragRef.current.active) return;
+        const nextX = Math.max(8, dragRef.current.originX + (clientX - dragRef.current.startX));
+        const nextY = Math.max(8, dragRef.current.originY + (clientY - dragRef.current.startY));
+        setPosition({ x: nextX, y: nextY });
+    };
+
+    const endDrag = () => {
+        dragRef.current.active = false;
+    };
 
     // Helper to determine icon based on type or content
     const getIcon = (candidate: CadastralData) => {
@@ -37,10 +66,22 @@ export const CadastralSelectionDialog: React.FC<CadastralSelectionDialogProps> =
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 pointer-events-auto">
-            <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[80vh]">
+        <div className="fixed inset-0 z-50 pointer-events-none p-4">
+            <div
+                className="pointer-events-auto bg-white rounded-xl shadow-2xl max-w-lg w-[calc(100%-2rem)] overflow-hidden flex flex-col max-h-[80vh]"
+                style={{ position: 'absolute', left: `${position.x}px`, top: `${position.y}px` }}
+            >
                 {/* Header */}
-                <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between flex-shrink-0">
+                <div
+                    className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between flex-shrink-0 cursor-move select-none"
+                    onMouseDown={(e) => beginDrag(e.clientX, e.clientY)}
+                    onMouseMove={(e) => updateDrag(e.clientX, e.clientY)}
+                    onMouseUp={endDrag}
+                    onMouseLeave={endDrag}
+                    onTouchStart={(e) => beginDrag(e.touches[0].clientX, e.touches[0].clientY)}
+                    onTouchMove={(e) => updateDrag(e.touches[0].clientX, e.touches[0].clientY)}
+                    onTouchEnd={endDrag}
+                >
                     <div className="flex items-center gap-3">
                         <Layers className="w-5 h-5 text-white" />
                         <div>

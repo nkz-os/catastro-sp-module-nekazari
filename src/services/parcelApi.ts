@@ -155,6 +155,22 @@ class ParcelApiService {
 
     return response;
   }
+
+  async findByCadastralReference(cadastralReference: string): Promise<boolean> {
+    const sanitizedRef = cadastralReference.replace(/"/g, '\\"');
+    const response = await this.client.get('/entities', {
+      params: {
+        type: 'AgriParcel',
+        q: `cadastralReference=="${sanitizedRef}"`,
+        limit: 1,
+      },
+      headers: {
+        'Link': `<https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`,
+      },
+    });
+
+    return Array.isArray(response) && response.length > 0;
+  }
 }
 
 export const parcelApi = new ParcelApiService();
