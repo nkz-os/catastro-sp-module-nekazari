@@ -29,7 +29,7 @@ INSERT INTO marketplace_modules (
     'catastro-spain',
     'Catastro Spain',
     'Spanish Cadastre integration for reverse geocoding and parcel lookup. Click-to-add parcels functionality.',
-    'https://nekazari.robotika.cloud/modules/catastro-spain/assets/remoteEntry.js',
+    'https://nekazari.robotika.cloud/modules/catastro-spain/nkz-module.js',
     'catastro_spain_module',
     './App',
     '1.0.0',

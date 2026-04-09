@@ -411,6 +411,20 @@ export const CadastralMapClickHandler: React.FC = () => {
 
     try {
       const { data: cadastralData, area } = pendingParcel;
+      const cadastralReference = cadastralData.cadastralReference || '';
+
+      if (cadastralReference) {
+        const alreadyExists = await parcelApi.findByCadastralReference(cadastralReference);
+        if (alreadyExists) {
+          setNotification({
+            type: 'warning',
+            message: t('warnings.alreadyExists', { ref: cadastralReference }),
+          });
+          clearNotificationAfterDelay();
+          setPendingParcel(null);
+          return;
+        }
+      }
 
       console.log('[CadastralMapClickHandler] Creating parcel...');
       const newParcel = {

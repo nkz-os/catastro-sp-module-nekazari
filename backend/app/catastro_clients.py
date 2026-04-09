@@ -16,6 +16,12 @@ import re
 
 logger = logging.getLogger(__name__)
 
+try:
+    from shapely.geometry import Point, shape
+except Exception:
+    Point = None
+    shape = None
+
 # Try to import cache service for capabilities caching
 try:
     from cache_service import get_cache
@@ -23,6 +29,42 @@ try:
 except ImportError:
     logger.warning("Cache service not available for capabilities discovery")
     _cache = None
+
+
+def _feature_distance_rank(feature: Dict[str, Any], longitude: float, latitude: float) -> Tuple[int, float]:
+    """
+    Rank a GeoJSON feature against a click point.
+
+    Returns:
+        (contains_priority, distance)
+        contains_priority: 0 when point is contained, 1 otherwise.
+        distance: geometric distance in source CRS units.
+    """
+    if not feature or not feature.get('geometry') or Point is None or shape is None:
+        return (1, float('inf'))
+
+    try:
+        geom = shape(feature['geometry'])
+        if geom.is_empty:
+            return (1, float('inf'))
+        click_point = Point(longitude, latitude)
+        if geom.contains(click_point) or geom.touches(click_point):
+            return (0, 0.0)
+        return (1, float(geom.distance(click_point)))
+    except Exception:
+        return (1, float('inf'))
+
+
+def _select_best_feature(features: List[Dict[str, Any]], longitude: float, latitude: float) -> Optional[Dict[str, Any]]:
+    """
+    Select the best cadastral feature for a click point.
+    Prioritizes geometries containing/touching the point, then nearest by distance.
+    """
+    if not features:
+        return None
+    if len(features) == 1:
+        return features[0]
+    return min(features, key=lambda f: _feature_distance_rank(f, longitude, latitude))
 
 
 class WFSCapabilitiesDiscovery:
@@ -1819,8 +1861,11 @@ class NavarraCatastroClient:
                 logger.debug("No features found in Navarra WFS response with any feature type")
                 return None
             
-            # Process the first feature found
-            feature = data['features'][0]
+            # Select the most relevant feature for the clicked point instead of relying on array order.
+            feature = _select_best_feature(data['features'], longitude, latitude)
+            if not feature:
+                logger.warning("Navarra WFS returned features but no selectable feature was found")
+                return None
             properties = feature.get('properties', {})
             geometry = feature.get('geometry')
             
@@ -2259,8 +2304,11 @@ class EuskadiCatastroClient:
                 logger.warning(f"No features found in Euskadi WFS for coordinates ({longitude}, {latitude}) after trying all URLs, feature types and BBOX formats")
                 return None
             
-            # Process Feature
-            feature = data['features'][0]
+            # Select the most relevant feature for the clicked point instead of relying on array order.
+            feature = _select_best_feature(data['features'], longitude, latitude)
+            if not feature:
+                logger.warning("Euskadi WFS returned features but no selectable feature was found")
+                return None
             properties = feature.get('properties', {})
             geometry = feature.get('geometry')
             

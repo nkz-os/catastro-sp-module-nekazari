@@ -57,7 +57,8 @@
     "defaultParcelName": "Parcel {{municipality}}"
   },
   "warnings": {
-    "noGeometry": "The selected entity has no geometry available for this operation."
+    "noGeometry": "The selected entity has no geometry available for this operation.",
+    "alreadyExists": "Parcel {{ref}} already exists in your entities."
   },
   "errors": {
     "timeout": "The cadastral service is taking longer than usual. Please try again.",

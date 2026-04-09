@@ -57,7 +57,8 @@
     "defaultParcelName": "Parcela {{municipality}}"
   },
   "warnings": {
-    "noGeometry": "La entidad seleccionada no tiene geometría disponible para esta operación."
+    "noGeometry": "La entidad seleccionada no tiene geometría disponible para esta operación.",
+    "alreadyExists": "La parcela {{ref}} ya existe en tus entidades."
   },
   "errors": {
     "timeout": "El servicio catastral está tardando más de lo habitual. Por favor, inténtalo de nuevo.",
