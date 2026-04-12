@@ -26,9 +26,13 @@ const getTenantId = (): string | null => {
 // Get API URL from runtime config
 const getApiUrl = (): string => {
   if (typeof window !== 'undefined') {
-    // 1. Use host's runtime config if available
-    if ((window as any).__ENV__?.API_URL) {
-      return (window as any).__ENV__.API_URL;
+    const env = (window as any).__ENV__;
+    // 1. Host runtime config (entrypoint.sh sets VITE_API_URL, not API_URL)
+    if (env?.VITE_API_URL) {
+      return String(env.VITE_API_URL).replace(/\/$/, '');
+    }
+    if (env?.API_URL) {
+      return String(env.API_URL).replace(/\/$/, '');
     }
     // 2. Derive from current origin: nekazari.{domain} → nkz.{domain}
     const origin = window.location.origin;

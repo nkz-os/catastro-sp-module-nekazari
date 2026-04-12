@@ -29,9 +29,12 @@ const getTenantId = (): string | null => {
 // Get API URL from runtime config
 const getApiUrl = (): string => {
   if (typeof window !== 'undefined') {
-    // 1. Use host's runtime config if available
-    if ((window as any).__ENV__?.API_URL) {
-      return (window as any).__ENV__.API_URL;
+    const env = (window as any).__ENV__;
+    if (env?.VITE_API_URL) {
+      return String(env.VITE_API_URL).replace(/\/$/, '');
+    }
+    if (env?.API_URL) {
+      return String(env.API_URL).replace(/\/$/, '');
     }
     // 2. Derive from current origin: nekazari.{domain} → nkz.{domain}
     const origin = window.location.origin;
@@ -158,14 +161,20 @@ class ParcelApiService {
 
   async findByCadastralReference(cadastralReference: string): Promise<boolean> {
     const sanitizedRef = cadastralReference.replace(/"/g, '\\"');
-    const response = await this.client.get('/entities', {
-      params: {
-        type: 'AgriParcel',
-        q: `cadastralReference=="${sanitizedRef}"`,
-        limit: 1,
-      },
+    const q = `cadastralReference=="${sanitizedRef}"`;
+    const qs = new URLSearchParams({
+      type: 'AgriParcel',
+      q,
+      limit: '1',
+    });
+    // NKZClient uses fetch (no axios-style `params`). GET must not reuse default
+    // `Content-Type: application/ld+json` without a body — that confuses some proxies
+    // and the API gateway JSON parsing path.
+    const response = await this.client.get(`/entities?${qs.toString()}`, {
       headers: {
-        'Link': `<https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`,
+        'Content-Type': 'application/json',
+        Accept: 'application/ld+json',
+        Link: `<https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`,
       },
     });
 

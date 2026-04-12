@@ -886,7 +886,7 @@ def query_by_coordinates():
     }
     """
     try:
-        data = request.json
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({'error': 'Request body required'}), 400
         
