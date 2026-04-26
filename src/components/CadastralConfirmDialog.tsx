@@ -19,7 +19,15 @@ export const CadastralConfirmDialog: React.FC<CadastralConfirmDialogProps> = ({
   isProcessing = false,
 }) => {
   const { t } = useTranslation('cadastral');
-  const [position, setPosition] = useState({ x: 24, y: 24 });
+  const getInitialPosition = () => {
+    if (typeof window === 'undefined') {
+      return { x: 360, y: 24 };
+    }
+    const preferredX = 360;
+    const maxX = Math.max(24, window.innerWidth - 460);
+    return { x: Math.min(preferredX, maxX), y: 24 };
+  };
+  const [position, setPosition] = useState(getInitialPosition);
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number; active: boolean }>({
     startX: 0,
     startY: 0,
