@@ -78,9 +78,28 @@ export const CadastralMapClickHandler: React.FC = () => {
   const notificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const confirmingRef = useRef(false);
+  const processingRef = useRef(false);
+  const pendingParcelRef = useRef<{
+    data: CadastralData;
+    area: number;
+  } | null>(null);
+  const candidatesRef = useRef<CadastralData[] | null>(null);
 
   // Only activate on /entities page
   const isEntitiesPage = location.pathname === '/entities';
+
+  // Keep refs in sync to avoid stale state inside Cesium click callback.
+  useEffect(() => {
+    processingRef.current = isProcessing;
+  }, [isProcessing]);
+
+  useEffect(() => {
+    pendingParcelRef.current = pendingParcel;
+  }, [pendingParcel]);
+
+  useEffect(() => {
+    candidatesRef.current = candidates;
+  }, [candidates]);
 
   useEffect(() => {
     console.log('[CadastralMapClickHandler] useEffect triggered', {
@@ -122,12 +141,12 @@ export const CadastralMapClickHandler: React.FC = () => {
 
     handler.setInputAction(async (click: any) => {
       console.log('[CadastralMapClickHandler] Click detected!', {
-        isProcessing,
-        hasPendingParcel: !!pendingParcel
+        isProcessing: processingRef.current,
+        hasPendingParcel: !!pendingParcelRef.current
       });
 
       // Check if we're processing a previous click or have a pending dialog
-      if (isProcessing || pendingParcel || candidates) {
+      if (processingRef.current || pendingParcelRef.current || candidatesRef.current) {
         console.log('[CadastralMapClickHandler] Click ignored (processing or pending)');
         return;
       }
@@ -166,7 +185,7 @@ export const CadastralMapClickHandler: React.FC = () => {
         handlerRef.current = null;
       }
     };
-  }, [isEntitiesPage, cesiumViewer, isClickEnabled, isProcessing, pendingParcel, candidates]);
+  }, [isEntitiesPage, cesiumViewer, isClickEnabled]);
 
   // Render pending parcel on map
   useEffect(() => {
@@ -236,6 +255,7 @@ export const CadastralMapClickHandler: React.FC = () => {
   };
 
   const handleMapClick = async (longitude: number, latitude: number) => {
+    processingRef.current = true;
     setIsProcessing(true);
     setNotification(null);
     setElapsedSeconds(0);
@@ -262,6 +282,7 @@ export const CadastralMapClickHandler: React.FC = () => {
 
       if (candidatesList.length > 1) {
         console.log(`[CadastralMapClickHandler] Found ${candidatesList.length} candidates, showing selection dialog`);
+        candidatesRef.current = candidatesList;
         setCandidates(candidatesList);
         setIsProcessing(false);
         return;
@@ -287,6 +308,7 @@ export const CadastralMapClickHandler: React.FC = () => {
       });
       clearNotificationAfterDelay(type === 'timeout' ? 8000 : 5000);
     } finally {
+      processingRef.current = false;
       setIsProcessing(false);
       setElapsedSeconds(0);
       if (timerRef.current) {
@@ -327,6 +349,8 @@ export const CadastralMapClickHandler: React.FC = () => {
     const area = calculatePolygonAreaHectares(data.geometry!);
 
     // Show confirmation
+    pendingParcelRef.current = { data, area };
+    candidatesRef.current = null;
     setPendingParcel({ data, area });
     setCandidates(null);
     setIsProcessing(false);
@@ -340,6 +364,8 @@ export const CadastralMapClickHandler: React.FC = () => {
   };
 
   const handleCancelSelection = () => {
+    candidatesRef.current = null;
+    processingRef.current = false;
     setCandidates(null);
     setIsProcessing(false);
   };
@@ -421,6 +447,7 @@ export const CadastralMapClickHandler: React.FC = () => {
             message: t('warnings.alreadyExists', { ref: cadastralReference }),
           });
           clearNotificationAfterDelay();
+          pendingParcelRef.current = null;
           setPendingParcel(null);
           return;
         }
@@ -443,6 +470,7 @@ export const CadastralMapClickHandler: React.FC = () => {
 
       await parcelApi.createParcel(newParcel);
 
+      pendingParcelRef.current = null;
       setPendingParcel(null);
 
       setNotification({
@@ -478,6 +506,8 @@ export const CadastralMapClickHandler: React.FC = () => {
   };
 
   const handleCancelParcel = () => {
+    pendingParcelRef.current = null;
+    processingRef.current = false;
     setPendingParcel(null);
     setIsProcessing(false);
   };
