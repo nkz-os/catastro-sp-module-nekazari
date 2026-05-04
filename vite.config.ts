@@ -21,6 +21,8 @@ const NKZ_EXTERNALS: Record<string, string> = {
   'react-router-dom': 'ReactRouterDOM',
   '@nekazari/sdk': '__NKZ_SDK__',
   '@nekazari/ui-kit': '__NKZ_UI__',
+  '@nekazari/design-tokens': '__NKZ_DESIGN_TOKENS__',
+  '@nekazari/viewer-kit': '__NKZ_VIEWER_KIT__',
 };
 
 // =============================================================================
