@@ -1,5 +1,5 @@
 {
-  "name": "nkz-module-cadastrial-sp",
+  "name": "nkz-module-cadastral-spain",
   "version": "1.0.0",
   "description": "Spanish Cadastre integration module for Nekazari - Click to add parcels",
   "license": "AGPL-3.0",
@@ -13,8 +13,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@nekazari/sdk": "^1.0.0",
-    "@nekazari/ui-kit": "^1.0.0",
+    "@nekazari/design-tokens": "^0.1.0-alpha",
+    "@nekazari/sdk": "^1.0.3",
+    "@nekazari/ui-kit": "^1.0.2-alpha.0",
+    "@nekazari/viewer-kit": "^0.1.0-alpha",
     "axios": "^1.6.0",
     "lucide-react": "^0.424.0",
     "react": "^18.3.1",

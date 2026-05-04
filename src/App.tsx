@@ -2,7 +2,6 @@ import React from 'react';
 import { useAuth, useTranslation } from '@nekazari/sdk';
 import { Card } from '@nekazari/ui-kit';
 import { MapPin, CheckCircle } from 'lucide-react';
-import './index.css';
 import './i18n';
 
 const CatastroSpainApp: React.FC = () => {
