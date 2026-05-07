@@ -233,11 +233,11 @@ export const GeoSearchBar: React.FC = () => {
                     className="
             flex items-center justify-center
             w-10 h-10 rounded-xl
-            bg-white/90 backdrop-blur-md
+            bg-white dark:bg-slate-900
             border border-slate-200
             shadow-lg
             text-slate-600
-            hover:bg-white hover:text-blue-600 hover:border-blue-300
+            hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-blue-600 hover:border-blue-300
             transition-all duration-200
           "
                     title={t('geosearch.searchLocation')}
@@ -260,15 +260,15 @@ export const GeoSearchBar: React.FC = () => {
             <div
                 className="
           flex items-center gap-2
-          bg-white/95 backdrop-blur-md
-          border border-slate-200
+          bg-white dark:bg-slate-900
+          border border-slate-200 dark:border-slate-700
           rounded-xl shadow-lg
           px-3 py-2
           focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100
           transition-all duration-200
         "
             >
-                <Search className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
                 <input
                     ref={inputRef}
                     type="text"
@@ -278,8 +278,8 @@ export const GeoSearchBar: React.FC = () => {
                     placeholder={t('geosearch.placeholder')}
                     className="
             flex-1 bg-transparent
-            text-sm text-slate-800
-            placeholder:text-slate-400
+            text-sm text-slate-800 dark:text-slate-100
+            placeholder:text-slate-400 dark:placeholder:text-slate-500
             outline-none
           "
                     autoComplete="off"
@@ -294,7 +294,7 @@ export const GeoSearchBar: React.FC = () => {
                             setResults([]);
                             inputRef.current?.focus();
                         }}
-                        className="text-slate-400 hover:text-slate-600 transition-colors"
+                        className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
                     >
                         <X className="w-4 h-4" />
                     </button>
@@ -307,7 +307,7 @@ export const GeoSearchBar: React.FC = () => {
                     }}
                     className="
             ml-1 p-1 rounded-lg
-            text-slate-400 hover:text-slate-600 hover:bg-slate-100
+            text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800
             transition-colors
           "
                     title={t('geosearch.close')}
@@ -321,8 +321,8 @@ export const GeoSearchBar: React.FC = () => {
                 <div
                     className="
             mt-1.5
-            bg-white/95 backdrop-blur-md
-            border border-slate-200
+            bg-white dark:bg-slate-900
+            border border-slate-200 dark:border-slate-700
             rounded-xl shadow-lg
             overflow-hidden
             divide-y divide-slate-100
@@ -338,19 +338,19 @@ export const GeoSearchBar: React.FC = () => {
                 text-left text-sm transition-colors
                 ${idx === activeIndex
                                     ? 'bg-blue-50 text-blue-800'
-                                    : 'text-slate-700 hover:bg-slate-50'
+                                    : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
                                 }
               `}
                         >
                             <MapPin
-                                className={`w-4 h-4 mt-0.5 flex-shrink-0 ${idx === activeIndex ? 'text-blue-500' : 'text-slate-400'
+                                className={`w-4 h-4 mt-0.5 flex-shrink-0 ${idx === activeIndex ? 'text-blue-500' : 'text-slate-400 dark:text-slate-500'
                                     }`}
                             />
                             <div className="flex-1 min-w-0">
                                 <div className="font-medium truncate">
                                     {getShortName(result)}
                                 </div>
-                                <div className="text-xs text-slate-500 truncate mt-0.5">
+                                <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
                                     {result.display_name}
                                 </div>
                             </div>
@@ -360,7 +360,7 @@ export const GeoSearchBar: React.FC = () => {
                   px-1.5 py-0.5 rounded-md flex-shrink-0 mt-0.5
                   ${idx === activeIndex
                                         ? 'bg-blue-100 text-blue-600'
-                                        : 'bg-slate-100 text-slate-500'
+                                        : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300'
                                     }
                 `}
                             >
@@ -376,10 +376,10 @@ export const GeoSearchBar: React.FC = () => {
                 <div
                     className="
             mt-1.5 px-4 py-3
-            bg-white/95 backdrop-blur-md
-            border border-slate-200
+            bg-white dark:bg-slate-900
+            border border-slate-200 dark:border-slate-700
             rounded-xl shadow-lg
-            text-sm text-slate-500 text-center
+            text-sm text-slate-500 dark:text-slate-300 text-center
           "
                 >
                     No se encontraron resultados
