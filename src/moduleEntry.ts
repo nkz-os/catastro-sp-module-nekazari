@@ -1,3 +1,4 @@
+import { defineModule } from "@nekazari/module-kit";
 import App from './App'; // Use the full App component
 import { moduleSlots } from './slots/index';
 import pkg from '../package.json';
