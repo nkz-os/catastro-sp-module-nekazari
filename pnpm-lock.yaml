@@ -37,11 +37,11 @@ importers:
         version: 6.30.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     devDependencies:
       '@nekazari/module-builder':
-        specifier: ^2.0.0
-        version: 2.0.0(@nekazari/module-kit@0.6.0)(@vitejs/plugin-react@4.7.0(vite@5.4.21))(node-fetch@2.7.0)(typescript@5.9.3)(vite@5.4.21)
+        specifier: ^2.0.3
+        version: 2.0.3(@nekazari/module-kit@0.6.0)(@vitejs/plugin-react@4.7.0(vite@5.4.21))(node-fetch@2.7.0)(typescript@5.9.3)(vite@5.4.21)
       '@nekazari/module-kit':
         specifier: ^0.6.0
-        version: 0.6.0(@nekazari/module-builder@2.0.0)(@nekazari/sdk@1.0.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@tanstack/react-query@5.100.10(react@18.3.1))(react@18.3.1)
+        version: 0.6.0(@nekazari/module-builder@2.0.3)(@nekazari/sdk@1.0.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@tanstack/react-query@5.100.10(react@18.3.1))(react@18.3.1)
       '@types/react':
         specifier: ^18.3.3
         version: 18.3.28
@@ -372,11 +372,11 @@ packages:
       react: ^18.3.1
       react-dom: ^18.3.1
 
-  '@nekazari/module-builder@2.0.0':
-    resolution: {integrity: sha512-EmiUBRuL2A/4zC3rVeDSJnlWNUpZLJ6bUBHcBKLBJtLxPhd4z+Pwo/+e28XH6SOnl3MI7Pca48dyOmWlCjwJzg==}
+  '@nekazari/module-builder@2.0.3':
+    resolution: {integrity: sha512-dcwPdrOChLOCprnB34T0DteryTInK0+Ix818F0WbFYkVdGNulsiToXDbKlABuojsCmICfGHMn9T6g+HR7TzAgg==}
     peerDependencies:
       '@nekazari/module-kit': '>=0.6.0'
-      '@vitejs/plugin-react': '>=4.0.0'
+      '@vitejs/plugin-react': ^4.0.0
       vite: '>=5.0.0'
 
   '@nekazari/module-kit@0.6.0':
@@ -2281,10 +2281,10 @@ snapshots:
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
 
-  '@nekazari/module-builder@2.0.0(@nekazari/module-kit@0.6.0)(@vitejs/plugin-react@4.7.0(vite@5.4.21))(node-fetch@2.7.0)(typescript@5.9.3)(vite@5.4.21)':
+  '@nekazari/module-builder@2.0.3(@nekazari/module-kit@0.6.0)(@vitejs/plugin-react@4.7.0(vite@5.4.21))(node-fetch@2.7.0)(typescript@5.9.3)(vite@5.4.21)':
     dependencies:
       '@module-federation/vite': 1.15.5(node-fetch@2.7.0)(typescript@5.9.3)(vite@5.4.21)
-      '@nekazari/module-kit': 0.6.0(@nekazari/module-builder@2.0.0)(@nekazari/sdk@1.0.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@tanstack/react-query@5.100.10(react@18.3.1))(react@18.3.1)
+      '@nekazari/module-kit': 0.6.0(@nekazari/module-builder@2.0.3)(@nekazari/sdk@1.0.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@tanstack/react-query@5.100.10(react@18.3.1))(react@18.3.1)
       '@vitejs/plugin-react': 4.7.0(vite@5.4.21)
       esbuild: 0.21.5
       vite: 5.4.21
@@ -2295,9 +2295,9 @@ snapshots:
       - utf-8-validate
       - vue-tsc
 
-  '@nekazari/module-kit@0.6.0(@nekazari/module-builder@2.0.0)(@nekazari/sdk@1.0.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@tanstack/react-query@5.100.10(react@18.3.1))(react@18.3.1)':
+  '@nekazari/module-kit@0.6.0(@nekazari/module-builder@2.0.3)(@nekazari/sdk@1.0.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@tanstack/react-query@5.100.10(react@18.3.1))(react@18.3.1)':
     dependencies:
-      '@nekazari/module-builder': 2.0.0(@nekazari/module-kit@0.6.0)(@vitejs/plugin-react@4.7.0(vite@5.4.21))(node-fetch@2.7.0)(typescript@5.9.3)(vite@5.4.21)
+      '@nekazari/module-builder': 2.0.3(@nekazari/module-kit@0.6.0)(@vitejs/plugin-react@4.7.0(vite@5.4.21))(node-fetch@2.7.0)(typescript@5.9.3)(vite@5.4.21)
       '@nekazari/sdk': 1.0.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@tanstack/react-query': 5.100.10(react@18.3.1)
       react: 18.3.1
