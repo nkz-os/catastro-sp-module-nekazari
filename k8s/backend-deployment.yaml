@@ -44,7 +44,10 @@ spec:
               value: "/api/cadastral-api"
             # Keycloak Configuration
             - name: KEYCLOAK_URL
-              value: "https://auth.robotika.cloud/auth"
+              valueFrom:
+                configMapKeyRef:
+                  name: catastro-sp-config
+                  key: KEYCLOAK_URL
             - name: KEYCLOAK_REALM
               value: "nekazari"
             - name: JWT_AUDIENCE
