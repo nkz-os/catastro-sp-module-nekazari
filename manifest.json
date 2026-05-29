@@ -4,6 +4,14 @@
   "display_name": "Catastro Spain",
   "version": "1.0.0",
   "description": "Spanish cadastre integration for reverse geocoding and parcel lookup",
+  "description_i18n": {
+    "es": "Integración con el catastro español para geocodificación inversa y consulta de parcelas",
+    "en": "Spanish cadastre integration for reverse geocoding and parcel lookup",
+    "eu": "Espainiako katastroarekiko integrazioa geokodifikazio alderantzikaturako eta partzelen kontsultarako",
+    "fr": "Intégration avec le cadastre espagnol pour le géocodage inverse et la consultation des parcelles",
+    "pt": "Integração com o cadastro espanhol para geocodificação inversa e consulta de parcelas",
+    "ca": "Integració amb el cadastre espanyol per a geocodificació inversa i consulta de parcel·les"
+  },
   "short_description": "Spanish cadastre reverse geocoding and parcel lookup",
   "author": {
     "name": "Nekazari Team",
