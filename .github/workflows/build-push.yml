@@ -131,3 +131,17 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Frontend Image" >> $GITHUB_STEP_SUMMARY
           echo "\`${{ steps.meta-frontend.outputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # Publish MF2 remote via OIDC (push to main only)
+  publish-module:
+    name: Publish Module
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      contents: read
+    uses: nkz-os/nkz/.github/workflows/_publish-module.yml@main
+    with:
+      module_id: catastro-spain
+    secrets:
+      INTERNAL_SERVICE_SECRET: ${{ secrets.INTERNAL_SERVICE_SECRET }}
