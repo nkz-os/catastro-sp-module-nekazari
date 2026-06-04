@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-backend:latest
+          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-backend@sha256:879c4cca0f31ff033f3dee66c6d2eb4ed661b56e8f7bb93b32595cc5aa345d72
           imagePullPolicy: Always
           ports:
             - name: http
