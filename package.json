@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Spanish Cadastre integration module for Nekazari - Click to add parcels",
   "license": "AGPL-3.0",
+  "packageManager": "pnpm@9.0.0",
   "type": "module",
   "main": "./src/Module.tsx",
   "nkz": {
