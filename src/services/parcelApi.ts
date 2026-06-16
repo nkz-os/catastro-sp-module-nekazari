@@ -51,112 +51,47 @@ class ParcelApiService {
   private client: NKZClient;
 
   constructor() {
+    // baseUrl is the API root: writes go to the entity-manager parcel API,
+    // reads (dedup lookup) go to Orion under /ngsi-ld/v1.
     this.client = new NKZClient({
-      baseUrl: `${getApiUrl()}/ngsi-ld/v1`,
+      baseUrl: `${getApiUrl()}`,
       getToken: getAuthToken,
       getTenantId: getTenantId,
       defaultHeaders: {
-        'Content-Type': 'application/ld+json',
+        'Content-Type': 'application/json',
       },
     });
   }
 
   async createParcel(parcel: Partial<Parcel>): Promise<Parcel> {
-    // Generate entity ID
-    const entityId = parcel.id || `urn:ngsi-ld:AgriParcel:${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Build NGSI-LD entity (same format as host platform)
-    const entity: any = {
-      id: entityId,
-      type: 'AgriParcel',
-      category: {
-        type: 'Property',
-        value: parcel.category || 'cadastral',
-      },
+    // entity-manager is the SOLE writer of AgriParcel. The FE sends flat domain
+    // fields; the server owns the URN id, the NGSI-LD envelope, the @context and
+    // dedup by cadastralReference. Never write Orion directly (the api-gateway
+    // blocks direct AgriParcel writes).
+    const payload: Record<string, any> = {
+      category: parcel.category || 'cadastral',
+      ndviEnabled: parcel.ndviEnabled !== undefined ? parcel.ndviEnabled : true,
     };
-
-    // Add location (GeoProperty)
     if (parcel.geometry) {
-      entity.location = {
-        type: 'GeoProperty',
-        value: {
-          type: parcel.geometry.type || 'Polygon',
-          coordinates: parcel.geometry.coordinates,
-        },
+      payload.geometry = {
+        type: parcel.geometry.type || 'Polygon',
+        coordinates: parcel.geometry.coordinates,
       };
     }
+    if (parcel.name) payload.name = parcel.name;
+    if (parcel.municipality && parcel.municipality.trim() !== '') payload.municipality = parcel.municipality;
+    if (parcel.province && parcel.province.trim() !== '') payload.province = parcel.province;
+    if (parcel.cadastralReference) payload.cadastralReference = parcel.cadastralReference;
+    if (parcel.cropType) payload.cropType = parcel.cropType;
+    if (parcel.area !== undefined && parcel.area !== null) payload.area = parcel.area;
+    if (parcel.notes) payload.notes = parcel.notes;
 
-    // Add name
-    if (parcel.name) {
-      entity.name = {
-        type: 'Property',
-        value: parcel.name,
-      };
-    }
+    const response = await this.client.post<{ id: string; created: boolean }>(
+      '/api/entities/parcels',
+      payload,
+    );
 
-    // Add municipality (only if not empty)
-    if (parcel.municipality && parcel.municipality.trim() !== '') {
-      entity.municipality = {
-        type: 'Property',
-        value: parcel.municipality,
-      };
-    }
-
-    // Add province (only if not empty)
-    if (parcel.province && parcel.province.trim() !== '') {
-      entity.province = {
-        type: 'Property',
-        value: parcel.province,
-      };
-    }
-
-    // Add cadastral reference
-    if (parcel.cadastralReference) {
-      entity.cadastralReference = {
-        type: 'Property',
-        value: parcel.cadastralReference,
-      };
-    }
-
-    // Add crop type
-    if (parcel.cropType) {
-      entity.cropType = {
-        type: 'Property',
-        value: parcel.cropType,
-      };
-    }
-
-    // Add area
-    if (parcel.area !== undefined && parcel.area !== null) {
-      entity.area = {
-        type: 'Property',
-        value: parcel.area,
-      };
-    }
-
-    // Add NDVI enabled flag
-    entity.ndviEnabled = {
-      type: 'Property',
-      value: parcel.ndviEnabled !== undefined ? parcel.ndviEnabled : true,
-    };
-
-    // Add notes
-    if (parcel.notes) {
-      entity.notes = {
-        type: 'Property',
-        value: parcel.notes,
-      };
-    }
-
-    // Use the parcel API from the host platform (same as parcelApi.createParcel in host)
-    // Context URL is typically https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld
-    const response = await this.client.post('/entities', entity, {
-      headers: {
-        'Link': `<https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`,
-      },
-    });
-
-    return response;
+    return { ...parcel, id: response?.id };
   }
 
   async findByCadastralReference(cadastralReference: string): Promise<boolean> {
@@ -169,8 +104,8 @@ class ParcelApiService {
     });
     // NKZClient uses fetch (no axios-style `params`). GET must not reuse default
     // `Content-Type: application/ld+json` without a body — that confuses some proxies
-    // and the API gateway JSON parsing path.
-    const response = await this.client.get(`/entities?${qs.toString()}`, {
+    // and the API gateway JSON parsing path. Reads hit Orion directly (allowed).
+    const response = await this.client.get(`/ngsi-ld/v1/entities?${qs.toString()}`, {
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/ld+json',
