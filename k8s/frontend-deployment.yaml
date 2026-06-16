@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-frontend-auto@sha256:5a392009951903657d5f077be88694c5810513edb1ebe3147a1623262b824947
+          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-frontend-auto@sha256:080df2257533d2e3fcc1db164f8ee2d89d25d6bc088e03437d16dd89af614bce  # PR #4: parcelApi writes via entity-manager (MF2 remote is the live FE path)
           imagePullPolicy: Always
           ports:
             - name: http
