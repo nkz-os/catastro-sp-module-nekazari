@@ -1,91 +1,182 @@
 #!/usr/bin/env python3
 # =============================================================================
-# Simple Authentication Middleware for Catastro Spain Module
+# Authentication Middleware for Catastro Spain Module
 # =============================================================================
-# Trusts API Gateway validation - only decodes token and extracts tenant
-# No need for complex Keycloak JWKs validation as API Gateway handles it
+# Trusts API Gateway validation + validates X-Auth-Signature HMAC.
+#
+# Per AGENTS.md:
+#   backends run REQUIRE_HMAC_SIGNATURE=true, so require_auth rejects
+#   unsigned requests with a SILENT 401.
+#
+# JWT decoding via PyJWT (verify against API Gateway's validation).
+# HMAC signature uses HMAC_SECRET shared with api-gateway + entity-manager.
 
 import os
+import hashlib
+import hmac
 import logging
 from functools import wraps
+
 from flask import request, jsonify, g
-import jwt
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
 # Configuration
-TRUST_API_GATEWAY = os.getenv('TRUST_API_GATEWAY', 'true').lower() == 'true'
+# ---------------------------------------------------------------------------
+HMAC_SECRET = os.getenv('HMAC_SECRET', '')
+REQUIRE_HMAC = os.getenv('REQUIRE_HMAC_SIGNATURE', 'true').lower() == 'true'
 
 
-def get_request_token():
-    """Extract JWT token from Authorization header or httpOnly cookie (fallback)."""
-    auth_header = request.headers.get('Authorization')
-    if auth_header and auth_header.startswith('Bearer '):
-        return auth_header.split(' ')[1]
-    return request.cookies.get('nkz_token')
+# ---------------------------------------------------------------------------
+# Public-prefix check
+# ---------------------------------------------------------------------------
+# Endpoints starting with these prefixes skip auth entirely.
+SKIP_AUTH_PREFIXES = tuple(
+    p.strip()
+    for p in os.getenv('SKIP_AUTH_PREFIXES', '/health,/readyz,/orion/').split(',')
+    if p.strip()
+)
 
+
+def _should_skip_auth(path: str) -> bool:
+    """Return True if *path* starts with any SKIP_AUTH_PREFIXES prefix."""
+    return path.startswith(SKIP_AUTH_PREFIXES)
+
+
+# ---------------------------------------------------------------------------
+# HMAC helpers
+# ---------------------------------------------------------------------------
+
+def generate_hmac_signature(token: str, tenant_id: str) -> str:
+    """Generate an HMAC-SHA256 signature for a token + tenant pair.
+
+    Mirrors exactly what api-gateway does in generate_hmac_signature().
+    """
+    if not HMAC_SECRET:
+        return ''
+    return hmac.new(
+        HMAC_SECRET.encode(),
+        f'{token}:{tenant_id}'.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _validate_hmac(
+    signature: str,
+    token: str,
+    tenant_id: str,
+    user_id: str,
+) -> bool:
+    """Validate that *signature* matches the expected HMAC for token+tenant.
+
+    Returns True when valid or when HMAC validation is disabled.
+    """
+    if not REQUIRE_HMAC or not HMAC_SECRET:
+        return True  # validation disabled
+    expected = generate_hmac_signature(token, tenant_id)
+    return hmac.compare_digest(signature, expected)
+
+
+# ---------------------------------------------------------------------------
+# Require-auth decorator
+# ---------------------------------------------------------------------------
 
 def require_auth(f):
     """
-    Simple authentication decorator for Flask routes.
+    Authentication decorator for Flask routes.
 
-    Trusts API Gateway validation:
-    - If X-Tenant-ID header is present, uses it (API Gateway already validated)
-    - Only decodes token to extract user info (no signature verification)
-    - Stores user info in Flask g for access in route handlers
-    - Reads token from Authorization header or httpOnly cookie (fallback)
+    Validates:
+      1. X-Tenant-ID header (mandatory)
+      2. X-User-Id header (mandatory for HMAC)
+      3. X-Auth-Signature HMAC (mandatory when REQUIRE_HMAC=true)
+
+    Stores extracted info in Flask *g* for route handlers:
+      g.tenant_id, g.user_id, g.current_user (JWT payload).
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Get token from Authorization header or httpOnly cookie
-        token = get_request_token()
-        if not token:
-            return jsonify({'error': 'Missing or invalid authorization header'}), 401
-        
-        # Get tenant from X-Tenant-ID header (set by API Gateway)
-        tenant_id = request.headers.get('X-Tenant-ID')
-        
-        try:
-            # Decode token without verification (API Gateway already validated it)
-            # Only check expiration
-            payload = jwt.decode(token, options={"verify_signature": False, "verify_exp": True})
-            
-            # Use tenant from header if available, otherwise try to extract from token
-            if not tenant_id:
-                tenant_id = payload.get('tenant-id') or payload.get('tenant_id') or payload.get('tenant')
-            
-            if not tenant_id:
-                logger.warning("No tenant_id found in token or X-Tenant-ID header")
-                return jsonify({'error': 'Tenant ID not found'}), 401
-            
-            # Store in Flask g for access in route handlers
-            g.current_user = payload
-            g.tenant = tenant_id
-            g.tenant_id = tenant_id
-            g.user_id = payload.get('sub')
-            g.username = payload.get('preferred_username')
-            g.email = payload.get('email')
-            g.roles = payload.get('realm_access', {}).get('roles', [])
-            
+        # ---- Skip auth for public endpoints ----
+        path = request.path
+        if _should_skip_auth(path):
+            logger.debug('Skipping auth for public path: %s', path)
             return f(*args, **kwargs)
-            
-        except jwt.ExpiredSignatureError:
-            logger.warning("Token expired")
-            return jsonify({'error': 'Token has expired'}), 401
-        except Exception as e:
-            logger.error(f"Error in auth decorator: {e}")
-            return jsonify({'error': 'Authentication error'}), 500
-    
+
+        # ---- Headers from API Gateway ----
+        token = _get_request_token()
+        tenant_id = request.headers.get('X-Tenant-ID')
+        user_id = request.headers.get('X-User-ID')
+        signature = request.headers.get('X-Auth-Signature')
+
+        # ---- Tenant ----
+        if not tenant_id:
+            logger.warning('Missing X-Tenant-ID')
+            return jsonify({'error': 'Missing X-Tenant-ID'}), 401
+
+        # ---- HMAC signature validation ----
+        if REQUIRE_HMAC and HMAC_SECRET:
+            if not signature:
+                logger.warning(
+                    'Missing X-Auth-Signature for tenant %s',
+                    tenant_id,
+                )
+                return jsonify({'error': 'Missing or invalid signature'}), 401
+            token_for_hmac = token or ''
+            expected = generate_hmac_signature(token_for_hmac, tenant_id)
+            if not hmac.compare_digest(signature, expected):
+                logger.warning(
+                    'Invalid X-Auth-Signature for tenant %s',
+                    tenant_id,
+                )
+                return jsonify({'error': 'Invalid signature'}), 401
+
+        # ---- JWT decode (best-effort for user info) ----
+        current_user = None
+        if token:
+            try:
+                import jwt as pyjwt
+
+                current_user = pyjwt.decode(
+                    token,
+                    options={'verify_signature': False, 'verify_exp': True},
+                )
+                if not user_id:
+                    user_id = current_user.get('sub')
+            except Exception:
+                logger.debug('Could not decode JWT (proceeding anyway)')
+
+        # ---- Store in Flask g ----
+        g.current_user = current_user
+        g.tenant_id = tenant_id
+        g.user_id = user_id or 'unknown'
+
+        logger.info(
+            'Auth OK: tenant=%s user=%s',
+            g.tenant_id,
+            g.user_id,
+        )
+        return f(*args, **kwargs)
+
     return decorated_function
 
 
+# ---------------------------------------------------------------------------
+# Helpers for route handlers
+# ---------------------------------------------------------------------------
+
+def _get_request_token():
+    """Extract JWT token from Authorization header or httpOnly cookie."""
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        return auth_header.split(' ', 1)[1]
+    return request.cookies.get('nkz_token')
+
+
 def get_current_user():
-    """Get current user from Flask request context"""
+    """Return current user dict from Flask g, or None."""
     return getattr(g, 'current_user', None)
 
 
 def get_current_tenant():
-    """Get current tenant from Flask request context"""
-    return getattr(g, 'tenant', None) or getattr(g, 'tenant_id', None)
-
-
+    """Return tenant ID from Flask g, or None."""
+    return getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None)

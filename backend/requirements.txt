@@ -9,4 +9,6 @@ shapely>=2.0.0
 zeep>=4.2.0
 pyproj>=3.6.0
 lxml>=4.9.0
+nkz-platform-sdk>=0.4.4
+geolibre-wasm>=0.4.4
 
