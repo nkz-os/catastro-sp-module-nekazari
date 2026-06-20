@@ -11,10 +11,13 @@ from flask import Flask, request, jsonify, g, Blueprint
 from flask_cors import CORS
 from typing import Dict, Any, List, Optional
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
 import json
 from datetime import datetime
 import requests
+
+# Orion-LD client wrapper (nkz-platform-sdk SyncOrionClient)
+from app.orion_client import get_orion_client
 
 # Add parent directories to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'common'))
@@ -46,6 +49,38 @@ def health():
 # Create Blueprint for API routes with prefix
 api_bp = Blueprint('api', __name__, url_prefix='/api/cadastral-api')
 
+# =============================================================================
+# Orion-LD Synchronization Endpoint
+# =============================================================================
+
+# TODO(Task 3): Remove orion_sync imports — replacing with entity-manager API
+# Import sync functions
+try:
+    from orion_sync import (
+        extract_ngsi_ld_value,
+        extract_tenant_from_entity,
+        sync_parcel_to_postgres,
+        delete_parcel_from_postgres
+    )
+except ImportError:
+    logger.warning("orion_sync not available (deprecated — see orion_sync.py)")
+    # Define dummy functions to prevent crashes
+    def extract_ngsi_ld_value(attr): return attr
+    def extract_tenant_from_entity(entity): return None
+    def sync_parcel_to_postgres(*args, **kwargs): return False
+    def delete_parcel_from_postgres(*args, **kwargs): return False
+
+# Entity-manager client — sole write path for AgriParcel (Task 3)
+try:
+    from entity_client import create_parcel as em_create_parcel
+    from entity_client import update_parcel as em_update_parcel
+    from entity_client import delete_parcel as em_delete_parcel
+except ImportError:
+    logger.warning("entity_client not available — entity-manager writes disabled")
+    def em_create_parcel(*args, **kwargs): return None
+    def em_update_parcel(*args, **kwargs): return False
+    def em_delete_parcel(*args, **kwargs): return False
+
 # Import cadastral clients and region router
 try:
     from region_router import get_region
@@ -69,6 +104,132 @@ try:
 except ImportError:
     logger.warning("Cache service not available, caching disabled")
     _cache = None
+
+@api_bp.route('/orion/notify', methods=['POST'])
+def orion_notification():
+    """Receive NGSI-LD subscription notifications about AgriParcel changes.
+
+    Called by Orion-LD when an AgriParcel is created/updated/deleted
+    via the entity-manager. Maintains the local read-model in PostGIS.
+    """
+    data = request.json
+    if not data or 'data' not in data:
+        return jsonify({'error': 'Invalid notification'}), 400
+
+    tenant_id = request.headers.get('NGSILD-Tenant', 'default')
+    logger.info("Received Orion notification for tenant %s (%d entities)",
+                tenant_id, len(data['data']))
+
+    for entity in data['data']:
+        # NGSI-LD entity with potentially expanded attribute names
+        entity_id = entity.get('id', '')
+        parcel_id = entity_id.split(':')[-1] if entity_id else None
+        if not parcel_id:
+            continue
+
+        # Extract location — may be short name or expanded URI
+        location = entity.get('location') or entity.get('https://uri.etsi.org/ngsi-ld/location', {})
+        if isinstance(location, dict):
+            geo_value = location.get('value') or location
+        else:
+            geo_value = None
+
+        # Check for deletion notification
+        deleted = entity.get('deleted', False) or entity.get('https://uri.etsi.org/ngsi-ld/deleted', False)
+
+        if deleted:
+            _delete_parcel_from_cache(tenant_id, parcel_id)
+            logger.info("Deleted parcel %s from cache", parcel_id)
+        else:
+            _cache_parcel(tenant_id, parcel_id, geo_value, entity)
+            logger.info("Cached parcel %s", parcel_id)
+
+    return jsonify({'received': len(data.get('data', []))}), 200
+
+
+def _ngsi_val(attr: Any) -> Any:
+    """Extract the value from an NGSI-LD attribute (short or expanded URI form)."""
+    if isinstance(attr, dict):
+        return attr.get('value')
+    return attr
+
+
+def _cache_parcel(tenant_id: str, parcel_id: str, geometry: Any, entity: dict) -> None:
+    """Store a parcel in the local cache/read-model."""
+    if not geometry or not isinstance(geometry, dict):
+        logger.warning("Cannot cache parcel %s: invalid or missing geometry", parcel_id)
+        return
+
+    # Extract attributes with @context-expanded name fallback
+    orion_entity_id = entity.get('id') or f'urn:ngsi-ld:AgriParcel:{parcel_id}'
+
+    def _get_attr(*names):
+        for name in names:
+            val = entity.get(name)
+            if val is not None:
+                return _ngsi_val(val)
+        return None
+
+    category = _get_attr('category', 'https://uri.etsi.org/ngsi-ld/category') or 'cadastral'
+    cadastral_ref = _get_attr('cadastralReference', 'https://uri.etsi.org/ngsi-ld/cadastralReference')
+    municipality = _get_attr('municipality', 'https://uri.etsi.org/ngsi-ld/municipality') or 'unknown'
+    province = _get_attr('province', 'https://uri.etsi.org/ngsi-ld/province') or 'unknown'
+    crop_type = _get_attr('cropType', 'https://uri.etsi.org/ngsi-ld/cropType') or 'unknown'
+
+    try:
+        conn = psycopg2.connect(POSTGRES_URL)
+        cur = conn.cursor()
+        geometry_json = json.dumps(geometry)
+        cur.execute("""
+            INSERT INTO cadastral_parcels (
+                orion_entity_id, tenant_id, geometry,
+                category, cadastral_reference,
+                municipality, province, crop_type,
+                updated_at
+            )
+            VALUES (%s, %s, ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326),
+                    %s, %s,
+                    %s, %s, %s,
+                    NOW())
+            ON CONFLICT (orion_entity_id)
+            DO UPDATE SET
+                geometry = ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326),
+                category = %s,
+                cadastral_reference = %s,
+                municipality = %s,
+                province = %s,
+                crop_type = %s,
+                updated_at = NOW()
+        """, (
+            orion_entity_id, tenant_id, geometry_json,
+            category, cadastral_ref,
+            municipality, province, crop_type,
+            geometry_json,
+            category, cadastral_ref,
+            municipality, province, crop_type,
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        logger.error("Failed to cache parcel %s: %s", parcel_id, exc)
+
+
+def _delete_parcel_from_cache(tenant_id: str, parcel_id: str) -> None:
+    """Remove a parcel from the local cache."""
+    try:
+        conn = psycopg2.connect(POSTGRES_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM cadastral_parcels WHERE tenant_id = %s AND orion_entity_id = %s",
+            (tenant_id, f'urn:ngsi-ld:AgriParcel:{parcel_id}')
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        logger.error("Failed to delete parcel %s: %s", parcel_id, exc)
+
 
 @api_bp.route('/parcels', methods=['GET'])
 @require_auth
@@ -121,11 +282,251 @@ def list_parcels():
         logger.error(f"Error listing parcels: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-# Parcel creation is owned by entity-manager (the SOLE writer of AgriParcel).
-# The cadastral frontend posts to entity-manager POST /api/entities/parcels;
-# cadastral_parcels is a read-model projected by subscription. The former direct
-# INSERT endpoint was removed to preserve the single-source-of-truth invariant.
 
+@api_bp.route('/parcels/parquet', methods=['GET'])
+@require_auth
+def get_parcels_parquet():
+    """Get tenant parcels as GeoParquet (fast, compressed).
+    
+    Replaces the GeoJSON endpoint for large datasets.
+    Frontend can read Parquet directly via @nekazari/geo-utils.
+    """
+    from flask import Response as _FlaskResponse
+    try:
+        tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None) or request.environ.get('tenant_id')
+        
+        conn = psycopg2.connect(POSTGRES_URL)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT 
+                id,
+                cadastral_reference,
+                municipality,
+                province,
+                crop_type,
+                area_hectares,
+                ST_AsGeoJSON(geometry) as geometry,
+                ndvi_enabled,
+                analytics_enabled,
+                is_active,
+                created_at
+            FROM cadastral_parcels
+            WHERE tenant_id = %s AND is_active = true
+            ORDER BY created_at DESC
+        """, (tenant_id,))
+        
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        if not rows:
+            return jsonify({'error': 'No parcels found'}), 404
+        
+        # Build GeoJSON FeatureCollection
+        features = []
+        for row in rows:
+            geom = json.loads(row['geometry']) if row.get('geometry') else None
+            props = {}
+            for key in ('id', 'cadastral_reference', 'municipality', 'province',
+                        'crop_type', 'area_hectares', 'ndvi_enabled',
+                        'analytics_enabled', 'is_active', 'created_at'):
+                if key in row:
+                    val = row[key]
+                    if hasattr(val, 'isoformat'):
+                        val = val.isoformat()
+                    props[key] = val
+            features.append({
+                'type': 'Feature',
+                'geometry': geom,
+                'properties': props,
+            })
+        
+        feature_collection = {
+            'type': 'FeatureCollection',
+            'features': features,
+        }
+        
+        from app.parquet_service import geojson_to_parquet
+        parquet_bytes = geojson_to_parquet(feature_collection)
+        if not parquet_bytes:
+            return jsonify({'error': 'Conversion failed'}), 500
+        
+        return _FlaskResponse(
+            parquet_bytes,
+            mimetype='application/vnd.apache.parquet',
+            headers={'Content-Disposition': f'attachment; filename=parcels_{tenant_id}.parquet'},
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating parquet: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@api_bp.route('/parcels', methods=['POST'])
+@require_auth
+def create_parcel():
+    """Create a new cadastral parcel"""
+    try:
+        # Try to get tenant_id from Flask g (Keycloak auth) or request.environ (fallback)
+        from flask import g
+        tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None) or request.environ.get('tenant_id')
+        user_id = getattr(g, 'user_id', None) or request.environ.get('user_id')
+        data = request.json
+        
+        # Validate required fields
+        required_fields = ['municipality', 'province', 'crop_type', 'geometry']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Validate geometry
+        geometry = data.get('geometry')
+        if not geometry:
+            return jsonify({'error': 'Missing required field: geometry'}), 400
+        
+        if not isinstance(geometry, dict):
+            return jsonify({'error': 'Invalid geometry format. Expected object'}), 400
+        
+        if geometry.get('type') != 'Polygon':
+            return jsonify({'error': f'Invalid geometry type. Expected Polygon, got {geometry.get("type")}'}), 400
+        
+        if 'coordinates' not in geometry:
+            return jsonify({'error': 'Missing coordinates in geometry'}), 400
+        
+        coordinates = geometry.get('coordinates')
+        if not isinstance(coordinates, list) or len(coordinates) == 0:
+            return jsonify({'error': 'Invalid coordinates format. Expected non-empty array'}), 400
+        
+        if not isinstance(coordinates[0], list) or len(coordinates[0]) < 3:
+            return jsonify({'error': 'Invalid polygon coordinates. Need at least 3 points'}), 400
+        
+        # Build NGSI-LD entity for entity-manager (primary write path)
+        import time as _time
+        cadastral_ref = data.get('cadastral_reference') or data.get('name') or (
+            'MANUAL-' + str(int(_time.time()))
+        )
+        ngsi_ld_entity = {
+            'id': f'urn:ngsi-ld:AgriParcel:{cadastral_ref}',
+            'type': 'AgriParcel',
+            'location': {
+                'type': 'GeoProperty',
+                'value': geometry,
+            },
+            'cadastralReference': {
+                'type': 'Property',
+                'value': cadastral_ref,
+            },
+            'municipality': {
+                'type': 'Property',
+                'value': data['municipality'],
+            },
+            'province': {
+                'type': 'Property',
+                'value': data['province'],
+            },
+            'cropType': {
+                'type': 'Property',
+                'value': data['crop_type'],
+            },
+            'description': {
+                'type': 'Property',
+                'value': data.get('notes', ''),
+            },
+            'category': {
+                'type': 'Property',
+                'value': 'cadastral',
+            },
+            '@context': 'https://nekazari.robotika.cloud/ngsi-ld-context.json',
+        }
+
+        # ---- Primary write: entity-manager (SoT) ----
+        em_id = em_create_parcel(tenant_id, ngsi_ld_entity, user_id or 'anonymous')
+        if not em_id:
+            logger.error('entity-manager create failed — falling back to PostGIS-only')
+            # Fall through to PostGIS (best-effort for dev/staging)
+
+        # ---- Secondary write: local PostGIS read-model ----
+        conn = None
+        cur = None
+        try:
+            conn = psycopg2.connect(POSTGRES_URL)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Set tenant context for RLS
+            cur.execute("SELECT set_config('app.current_tenant', %s, false)", (tenant_id,))
+            
+            geometry_json = json.dumps(geometry)
+            cur.execute("""
+            INSERT INTO cadastral_parcels (
+                tenant_id,
+                cadastral_reference,
+                municipality,
+                province,
+                crop_type,
+                geometry,
+                area_hectares,
+                selected_by_user_id,
+                notes,
+                orion_entity_id
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                ST_GeomFromGeoJSON(%s),
+                ST_Area(ST_GeomFromGeoJSON(%s)::geography) / 10000,
+                %s,
+                %s,
+                %s
+            )
+            RETURNING id, area_hectares
+        """, (
+            tenant_id,
+            cadastral_ref,
+            data['municipality'],
+            data['province'],
+            data['crop_type'],
+            geometry_json,
+            geometry_json,  # Calculate area from geometry
+            user_id,
+            data.get('notes'),
+            em_id,  # orion_entity_id from entity-manager
+        ))
+            
+            result = cur.fetchone()
+            parcel_id = result['id'] if result else em_id or cadastral_ref
+            area_hectares = float(result['area_hectares']) if result and result.get('area_hectares') else None
+            conn.commit()
+            cur.close()
+            conn.close()
+            
+            logger.info(f"Created parcel {parcel_id} for tenant {tenant_id} (area: {area_hectares} ha)")
+            return jsonify({
+                'id': parcel_id,
+                'area_hectares': area_hectares,
+                'orion_entity_id': em_id,
+                'message': 'Parcel created successfully'
+            }), 201
+            
+        except psycopg2.IntegrityError as e:
+            logger.error(f"Integrity error creating parcel: {e}")
+            if conn:
+                conn.rollback()
+            return jsonify({'error': 'Parcel already exists for this tenant'}), 409
+        except psycopg2.Error as e:
+            logger.error(f"PostgreSQL error creating parcel: {e}", exc_info=True)
+            if conn:
+                conn.rollback()
+            error_msg = str(e)
+            if 'geometry' in error_msg.lower() or 'st_geomfromgeojson' in error_msg.lower():
+                return jsonify({'error': f'Invalid geometry format: {error_msg}'}), 400
+            return jsonify({'error': f'Database error: {error_msg}'}), 500
+        except Exception as e:
+            logger.error(f"Error creating parcel: {e}", exc_info=True)
+            if conn:
+                conn.rollback()
+            return jsonify({'error': f'Failed to create parcel: {str(e)}'}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error in create_parcel: {e}", exc_info=True)
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
 @api_bp.route('/parcels/<parcel_id>', methods=['GET'])
 @require_auth
@@ -184,10 +585,136 @@ def get_parcel(parcel_id):
         logger.error(f"Error getting parcel: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-# Parcel update and delete are owned by entity-manager (PATCH/DELETE
-# /api/entities/parcels/{id}); the former direct read-model writes were removed
-# to preserve the single-source-of-truth invariant.
+@api_bp.route('/parcels/<parcel_id>', methods=['PUT'])
+@require_auth
+def update_parcel(parcel_id):
+    """Update a parcel"""
+    try:
+        # Try to get tenant_id from Flask g (Keycloak auth) or request.environ (fallback)
+        tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None) or request.environ.get('tenant_id')
+        data = request.json
+        
+        # Connect to database
+        conn = psycopg2.connect(POSTGRES_URL)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Set tenant context
+        cur.execute("SELECT set_config('app.current_tenant', %s, false)", (tenant_id,))
+        
+        # ---- Primary write: entity-manager (SoT) ----
+        em_payload = {}
+        if 'crop_type' in data:
+            em_payload['cropType'] = {'type': 'Property', 'value': data['crop_type']}
+        if 'notes' in data:
+            em_payload['description'] = {'type': 'Property', 'value': data['notes']}
+        if 'cadastral_reference' in data:
+            em_payload['cadastralReference'] = {'type': 'Property', 'value': data['cadastral_reference']}
+        if 'geometry' in data:
+            geometry = data['geometry']
+            if geometry.get('type') != 'Polygon':
+                return jsonify({'error': 'Invalid geometry type'}), 400
+            em_payload['location'] = {'type': 'GeoProperty', 'value': geometry}
 
+        if em_payload:
+            em_success = em_update_parcel(tenant_id, parcel_id, em_payload, user_id or 'anonymous')
+            if not em_success:
+                logger.warning('entity-manager update failed — updating PostGIS only')
+
+        # ---- Secondary write: PostGIS read-model ----
+        updates = []
+        values = []
+        
+        allowed_fields = ['crop_type', 'notes', 'ndvi_enabled', 'analytics_enabled', 'tags', 'cadastral_reference']
+        for field in allowed_fields:
+            if field in data:
+                updates.append(f"{field} = %s")
+                values.append(data[field])
+        
+        # Handle geometry update
+        if 'geometry' in data:
+            geometry = data['geometry']
+            if geometry.get('type') != 'Polygon':
+                return jsonify({'error': 'Invalid geometry type'}), 400
+            updates.append("geometry = ST_GeomFromGeoJSON(%s)")
+            values.append(json.dumps(geometry))
+        
+        if not updates and not em_payload:
+            return jsonify({'error': 'No fields to update'}), 400
+
+        if updates:
+            # Add parcel_id to values
+            values.append(parcel_id)
+            
+            # Execute update
+            query = f"""
+                UPDATE cadastral_parcels
+                SET {', '.join(updates)}
+                WHERE id = %s
+                RETURNING id
+            """
+            cur.execute(query, values)
+            
+            updated = cur.fetchone()
+            conn.commit()
+            cur.close()
+            conn.close()
+            
+            if not updated:
+                return jsonify({'error': 'Parcel not found'}), 404
+        else:
+            # Only entity-manager update happened
+            cur.close()
+            conn.close()
+        
+        logger.info(f"Updated parcel {parcel_id} for tenant {tenant_id}")
+        return jsonify({'message': 'Parcel updated successfully'}), 200
+        
+    except Exception as e:
+        logger.error(f"Error updating parcel: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@api_bp.route('/parcels/<parcel_id>', methods=['DELETE'])
+@require_auth
+def delete_parcel(parcel_id):
+    """Soft delete a parcel (set is_active = false)"""
+    try:
+        # Try to get tenant_id from Flask g (Keycloak auth) or request.environ (fallback)
+        tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None) or request.environ.get('tenant_id')
+        
+        # Connect to database
+        conn = psycopg2.connect(POSTGRES_URL)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # ---- Primary delete: entity-manager (SoT) ----
+        em_success = em_delete_parcel(tenant_id, parcel_id, user_id or 'anonymous')
+        if not em_success:
+            logger.warning('entity-manager delete failed — proceeding with PostGIS soft-delete')
+
+        # Set tenant context
+        cur.execute("SELECT set_config('app.current_tenant', %s, false)", (tenant_id,))
+        
+        # Soft delete
+        cur.execute("""
+            UPDATE cadastral_parcels
+            SET is_active = false
+            WHERE id = %s
+            RETURNING id
+        """, (parcel_id,))
+        
+        deleted = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        if not deleted:
+            return jsonify({'error': 'Parcel not found'}), 404
+        
+        logger.info(f"Deleted parcel {parcel_id} for tenant {tenant_id}")
+        return jsonify({'message': 'Parcel deleted successfully'}), 200
+        
+    except Exception as e:
+        logger.error(f"Error deleting parcel: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @api_bp.route('/parcels/summary', methods=['GET'])
 @require_auth
