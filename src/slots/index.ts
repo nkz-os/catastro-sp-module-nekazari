@@ -2,6 +2,8 @@ import React from 'react';
 import { CadastralMapClickHandler } from '../components/CadastralMapClickHandler';
 import { CadastralClickToggle } from '../components/CadastralClickToggle';
 import { GeoSearchBar } from '../components/GeoSearchBar';
+import { CadastralBuildingLayer } from '../components/CadastralBuildingLayer';
+import { CadastralBuildingsToggle } from '../components/CadastralBuildingsToggle';
 import { CadastralProvider } from '../context/CadastralContext';
 import type { ModuleViewerSlots, SlotWidgetDefinition } from '@nekazari/sdk';
 
@@ -32,6 +34,13 @@ export const moduleSlots: ModuleViewerSlots = {
       priority: 50,
       localComponent: GeoSearchBar,
     },
+    {
+      id: 'catastro-spain-building-layer',
+      moduleId: MODULE_ID,
+      component: 'CadastralBuildingLayer',
+      priority: 90,
+      localComponent: CadastralBuildingLayer,
+    },
   ],
   'layer-toggle': [
     {
@@ -40,6 +49,13 @@ export const moduleSlots: ModuleViewerSlots = {
       component: 'CadastralClickToggle',
       priority: 20,
       localComponent: CadastralClickToggle,
+    },
+    {
+      id: 'catastro-spain-buildings-toggle',
+      moduleId: MODULE_ID,
+      component: 'CadastralBuildingsToggle',
+      priority: 15,
+      localComponent: CadastralBuildingsToggle,
     },
   ],
   'context-panel': [],
