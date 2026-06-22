@@ -1727,6 +1727,299 @@ class SpanishStateCatastroClient:
             logger.warning(f"Error extracting municipality/province from address: {e}")
             return None, None
 
+    def get_buildings(
+        self,
+        bbox: tuple,
+        srs: str = "4326"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Query buildings from DGC WFS BuildingPart service.
+
+        Uses WFS: http://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx
+        Feature type: BU:BuildingPart
+        Computes height from numberOfFloorsAboveGround (height = floors * 3.0m).
+        Default height: 6.0m (2 floors) when attribute is missing.
+
+        Args:
+            bbox: Bounding box tuple (minx, miny, maxx, maxy)
+            srs: Spatial reference system (default: "4326")
+
+        Returns:
+            GeoJSON FeatureCollection with 'height' property, or None
+        """
+        try:
+            import requests
+
+            wfs_url = "http://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx"
+
+            srs_code = str(srs)
+            if srs_code.upper().startswith("EPSG"):
+                srs_code = srs_code.split(":")[-1]
+            srs_name = f"EPSG::{srs_code}"
+
+            # Build bbox string (minx,miny,maxx,maxy)
+            bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]},{srs_name}"
+
+            # Try JSON output first
+            params = {
+                'service': 'WFS',
+                'version': '2.0.0',
+                'request': 'GetFeature',
+                'typeNames': 'BU:BuildingPart',
+                'srsName': srs_name,
+                'bbox': bbox_str,
+                'outputFormat': 'application/json',
+            }
+
+            logger.info(f"Requesting buildings from WFS BU: bbox={bbox_str}")
+            response = requests.get(wfs_url, params=params, timeout=15)
+
+            if response.status_code == 200:
+                # Check if response is JSON
+                content_type = response.headers.get('Content-Type', '')
+                if 'json' in content_type.lower() or response.text.strip().startswith('{'):
+                    try:
+                        data = response.json()
+                        if data.get('features'):
+                            logger.info(f"Found {len(data['features'])} buildings in JSON response")
+                            return self._parse_building_json(data)
+                    except (ValueError, json.JSONDecodeError):
+                        logger.warning("JSON parse failed for building WFS, falling back to GML")
+
+                # Fallback: try without outputFormat for GML/XML
+                logger.info("Building WFS did not return JSON, trying GML/XML fallback")
+                params_no_format = {k: v for k, v in params.items() if k != 'outputFormat'}
+                response = requests.get(wfs_url, params=params_no_format, timeout=15)
+
+                if response.status_code == 200:
+                    result = self._parse_building_gml(response.content)
+                    if result:
+                        return result
+
+                # Try WFS 1.1.0 as last fallback
+                params_110 = params_no_format.copy()
+                params_110['version'] = '1.1.0'
+                response = requests.get(wfs_url, params=params_110, timeout=15)
+
+                if response.status_code == 200:
+                    result = self._parse_building_gml(response.content)
+                    if result:
+                        return result
+
+            logger.warning(f"Building WFS returned status {response.status_code}")
+            return None
+
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Building WFS request failed: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error in get_buildings: {e}", exc_info=True)
+            return None
+
+    def _parse_building_json(self, data: dict) -> Dict[str, Any]:
+        """
+        Parse building GeoJSON from WFS response, computing height from numberOfFloorsAboveGround.
+
+        Iterates features, extracts numberOfFloorsAboveGround, computes height = floors * 3.0m.
+        Default 6.0m (2 floors) when attribute is missing.
+
+        Args:
+            data: GeoJSON FeatureCollection from WFS response
+
+        Returns:
+            GeoJSON FeatureCollection with 'height' property added to each feature
+        """
+        features = []
+        for feature in data.get('features', []):
+            props = feature.get('properties', {})
+            floors = None
+
+            # Try to extract numberOfFloorsAboveGround (various possible key names)
+            for key in ('numberOfFloorsAboveGround', 'numberoffloorsaboveground',
+                        'floors', 'numPlantas', 'NUM_PLANTAS', 'altura'):
+                val = props.get(key)
+                if val is not None:
+                    try:
+                        floors = int(float(str(val)))
+                        break
+                    except (ValueError, TypeError):
+                        continue
+
+            # Calculate height: floors * 3.0m, default 6.0m (2 floors)
+            if floors is not None and floors > 0:
+                height = floors * 3.0
+            else:
+                height = 6.0
+                floors = 2
+
+            # Add/update height and floors properties
+            new_props = dict(props)
+            new_props['height'] = height
+            new_props['numberOfFloorsAboveGround'] = floors
+
+            feat = {
+                'type': 'Feature',
+                'geometry': feature.get('geometry'),
+                'properties': new_props,
+            }
+            if feature.get('id') is not None:
+                feat['id'] = feature['id']
+
+            features.append(feat)
+
+        return {
+            'type': 'FeatureCollection',
+            'features': features
+        }
+
+    def _parse_building_gml(self, content: bytes) -> Optional[Dict[str, Any]]:
+        """
+        Parse GML/XML building response when JSON is not available.
+
+        Extracts geometry and numberOfFloorsAboveGround from GML features,
+        computing height = floors * 3.0m (default 6.0m when attribute missing).
+        Uses _extract_coordinates_recursive for robust geometry parsing.
+
+        Args:
+            content: XML bytes from WFS response
+
+        Returns:
+            GeoJSON FeatureCollection with 'height' property, or None
+        """
+        try:
+            from lxml import etree
+
+            root = etree.fromstring(content)
+
+            # Namespaces for INSPIRE Building WFS
+            namespaces = {
+                'wfs': 'http://www.opengis.net/wfs/2.0',
+                'gml': 'http://www.opengis.net/gml/3.2',
+                'bu': 'http://inspire.ec.europa.eu/schemas/bu/4.0',
+                'base': 'http://inspire.ec.europa.eu/schemas/base/3.3',
+            }
+
+            # Find all feature members (WFS 2.0)
+            feature_members = root.findall('.//wfs:member', namespaces)
+
+            # Fallback: no namespace
+            if not feature_members:
+                feature_members = root.findall('.//{http://www.opengis.net/wfs/2.0}member')
+            if not feature_members:
+                feature_members = root.findall('.//member')
+
+            # Fallback: gml:featureMember (WFS 1.1)
+            if not feature_members:
+                feature_members = root.findall('.//gml:featureMember', namespaces)
+            if not feature_members:
+                feature_members = root.findall('.//{http://www.opengis.net/gml/3.2}featureMember')
+            if not feature_members:
+                feature_members = root.findall('.//featureMember')
+
+            if not feature_members:
+                logger.warning("No feature members found in building GML response")
+                return None
+
+            features = []
+            for member in feature_members:
+                # Find the BuildingPart element inside the member
+                building = None
+                for child in member:
+                    building = child
+                    break
+
+                if building is None:
+                    continue
+
+                # Extract geometry using recursive coordinate finder
+                geometry = None
+                coords = self._extract_coordinates_recursive(building, namespaces)
+                if coords and len(coords) >= 3:
+                    # Close polygon if not already closed
+                    if coords[0] != coords[-1]:
+                        coords.append(coords[0])
+                    geometry = {
+                        'type': 'Polygon',
+                        'coordinates': [coords]
+                    }
+
+                # Extract numberOfFloorsAboveGround
+                floors = None
+                for path in (
+                    './/bu:numberOfFloorsAboveGround',
+                    './/{http://inspire.ec.europa.eu/schemas/bu/4.0}numberOfFloorsAboveGround',
+                    './/numberOfFloorsAboveGround',
+                    './/numberoffloorsaboveground',
+                ):
+                    try:
+                        if '{' in path:
+                            elem = building.find(path)
+                        else:
+                            elem = building.find(path, namespaces)
+                        if elem is None and '{' not in path:
+                            # Try with explicit namespace
+                            elem = building.find(f'{{http://inspire.ec.europa.eu/schemas/bu/4.0}}{path.split(":")[-1]}' if ':' in path else path)
+                    except Exception:
+                        elem = None
+
+                    if elem is not None and elem.text is not None:
+                        try:
+                            floors = int(float(elem.text.strip()))
+                            break
+                        except (ValueError, TypeError):
+                            continue
+
+                # Calculate height
+                if floors is not None and floors > 0:
+                    height = floors * 3.0
+                else:
+                    height = 6.0
+                    floors = 2
+
+                props = {
+                    'height': height,
+                    'numberOfFloorsAboveGround': floors,
+                }
+
+                # Try to extract building ID from inspireId
+                for id_elem in building.findall('.//{http://inspire.ec.europa.eu/schemas/bu/4.0}inspireId'):
+                    local_id = id_elem.find('.//{http://inspire.ec.europa.eu/schemas/base/3.3}localId')
+                    if local_id is not None and local_id.text:
+                        props['buildingId'] = local_id.text.strip()
+                        break
+
+                # Try gml:id from building element
+                gml_id = building.get('{http://www.opengis.net/gml/3.2}id') or building.get('id')
+                if gml_id:
+                    props['id'] = gml_id
+
+                feat = {
+                    'type': 'Feature',
+                    'geometry': geometry,
+                    'properties': props,
+                }
+                if gml_id:
+                    feat['id'] = gml_id
+
+                features.append(feat)
+
+            if not features:
+                logger.warning("No building features parsed from GML response")
+                return None
+
+            logger.info(f"Parsed {len(features)} buildings from GML response")
+            return {
+                'type': 'FeatureCollection',
+                'features': features
+            }
+
+        except etree.XMLSyntaxError as e:
+            logger.error(f"XML syntax error parsing building GML: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing building GML: {e}", exc_info=True)
+            return None
+
 
 # Placeholder classes for future phases
 class NavarraCatastroClient:
