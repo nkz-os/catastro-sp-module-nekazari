@@ -1231,6 +1231,169 @@ def query_by_coordinates():
             'message': str(e)
         }), 500
 
+
+# =============================================================================
+# Building Endpoints
+# =============================================================================
+
+
+def _get_spanish_client():
+    """Helper to instantiate Spanish State Catastro client."""
+    if not SpanishStateCatastroClient:
+        return None
+    return SpanishStateCatastroClient()
+
+
+def _get_navarra_client():
+    """Helper to instantiate Navarra Catastro client."""
+    if not NavarraCatastroClient:
+        return None
+    return NavarraCatastroClient()
+
+
+def _get_buildings_for_bbox(bbox):
+    """
+    Internal helper: query buildings for a bbox with regional routing.
+
+    Args:
+        bbox: Tuple (minx, miny, maxx, maxy) in WGS84
+
+    Returns:
+        (data_dict, status_code) where data_dict is the response body.
+    """
+    centre_lat = (bbox[1] + bbox[3]) / 2.0
+    centre_lon = (bbox[0] + bbox[2]) / 2.0
+    region = get_region(centre_lat, centre_lon)
+
+    if region == 'spain':
+        client = _get_spanish_client()
+        if not client:
+            return {'error': 'Spanish State Catastro client not available'}, 503
+        buildings = client.get_buildings(bbox)
+    elif region == 'navarra':
+        client = _get_navarra_client()
+        if not client:
+            return {'error': 'Navarra Catastro client not available'}, 503
+        buildings = client.query_buildings(bbox)
+    elif region == 'euskadi':
+        return {
+            'error': 'Not implemented',
+            'region': 'euskadi',
+            'message': 'Euskadi building layer not yet available'
+        }, 501
+    else:
+        return {'error': f'Unknown region: {region}'}, 500
+
+    if not buildings:
+        return {'type': 'FeatureCollection', 'features': []}, 200
+
+    return buildings, 200
+
+
+def _get_parcel_geom(parcel_id):
+    """
+    Get parcel geometry from PostGIS read-model.
+
+    Args:
+        parcel_id: Parcel ID (UUID or cadastral reference)
+
+    Returns:
+        GeoJSON geometry dict, or None if not found.
+    """
+    try:
+        conn = psycopg2.connect(POSTGRES_URL)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT ST_AsGeoJSON(geometry) as geometry
+            FROM cadastral_parcels
+            WHERE id = %s OR cadastral_reference = %s
+        """, (parcel_id, parcel_id))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row and row.get('geometry'):
+            return json.loads(row['geometry'])
+        return None
+    except Exception as e:
+        logger.error(f"Error getting parcel geometry for {parcel_id}: {e}")
+        return None
+
+
+@api_bp.route('/buildings', methods=['GET'])
+@require_auth
+def get_buildings():
+    """
+    Get 3D building footprints within a bounding box.
+
+    Query params:
+        bbox: west,south,east,north (WGS84, required)
+
+    Returns:
+        GeoJSON FeatureCollection with 'height' property.
+    """
+    bbox_str = request.args.get('bbox')
+    if not bbox_str:
+        return jsonify({'error': 'bbox parameter required (west,south,east,north)'}), 400
+
+    try:
+        parts = [float(x) for x in bbox_str.split(',')]
+        if len(parts) != 4:
+            return jsonify({'error': 'bbox requires exactly 4 values: west,south,east,north'}), 400
+        bbox = tuple(parts)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid bbox format. Use: west,south,east,north'}), 400
+
+    data, status = _get_buildings_for_bbox(bbox)
+    return jsonify(data), status
+
+
+@api_bp.route('/parcels/<parcel_id>/buildings', methods=['GET'])
+@require_auth
+def get_parcel_buildings(parcel_id):
+    """
+    Get buildings intersecting with a specific parcel.
+
+    Fetches the parcel geometry from PostGIS, then queries buildings
+    in the parcel's bounding box and filters by spatial intersection.
+
+    Args:
+        parcel_id: Parcel UUID or cadastral reference
+
+    Returns:
+        GeoJSON FeatureCollection of intersecting buildings.
+    """
+    # Get parcel geometry from read-model
+    parcel_geom = _get_parcel_geom(parcel_id)
+    if not parcel_geom:
+        return jsonify({'error': 'Parcel not found'}), 404
+
+    # Get bbox of parcel
+    from shapely.geometry import shape
+    parcel_shape = shape(parcel_geom)
+    bbox = parcel_shape.bounds  # (minx, miny, maxx, maxy)
+
+    # Get buildings in that bbox
+    data, status = _get_buildings_for_bbox(bbox)
+
+    if status != 200:
+        return jsonify(data), status
+
+    if not isinstance(data, dict) or 'features' not in data:
+        return jsonify({'type': 'FeatureCollection', 'features': []}), 200
+
+    # Spatial filter: keep only buildings that intersect with parcel
+    filtered = []
+    for feat in data.get('features', []):
+        try:
+            feat_shape = shape(feat.get('geometry', {}))
+            if feat_shape and parcel_shape.intersects(feat_shape):
+                filtered.append(feat)
+        except Exception:
+            continue
+
+    return jsonify({'type': 'FeatureCollection', 'features': filtered}), 200
+
+
 if __name__ == '__main__':
     # Register blueprint
     app.register_blueprint(api_bp)
