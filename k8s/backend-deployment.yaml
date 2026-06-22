@@ -32,7 +32,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-backend@sha256:7940313c79d327067752b17465fd8a28e84b0ac976c86da738f4a3ed24f6fcd6  # PR #4: remove dead parcel-write endpoints + retire orion_sync
+          image: ghcr.io/nkz-os/nkz-module-cadastral-spain/backend@sha256:0855ba5acdb67a93d91d764c7aba471e02185189520f7cd42f855fc8ca370d6b  # feat: 3D buildings + FIWARE revival
           imagePullPolicy: Always
           ports:
             - name: http
