@@ -15,6 +15,7 @@ from psycopg2.extras import RealDictCursor, Json
 import json
 from datetime import datetime
 import requests
+from shapely.geometry import shape
 
 # Orion-LD client wrapper (nkz-platform-sdk SyncOrionClient)
 from app.orion_client import get_orion_client
@@ -1368,7 +1369,6 @@ def get_parcel_buildings(parcel_id):
         return jsonify({'error': 'Parcel not found'}), 404
 
     # Get bbox of parcel
-    from shapely.geometry import shape
     parcel_shape = shape(parcel_geom)
     bbox = parcel_shape.bounds  # (minx, miny, maxx, maxy)
 

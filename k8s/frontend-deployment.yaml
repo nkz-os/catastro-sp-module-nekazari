@@ -17,8 +17,8 @@ metadata:
     module: catastro-spain
     nekazari.io/profile: addon
 spec:
-  # Parked (replicas: 0) alongside the backend — see backend-deployment.yaml.
-  replicas: 0
+  # Restored alongside backend
+  replicas: 1
   selector:
     matchLabels:
       app: catastro-spain-frontend

@@ -17,9 +17,8 @@ metadata:
     module: catastro-spain
     nekazari.io/profile: addon
 spec:
-  # Parked (replicas: 0) — module reads the retired cadastral_parcels read-model.
-  # Re-enable only after migrating its parcel I/O to /ngsi-ld (uniform writes, Plan 2).
-  replicas: 0
+  # Restored — FIWARE compliance + entity-manager routing + 3D buildings
+  replicas: 1
   selector:
     matchLabels:
       app: catastro-spain-backend
