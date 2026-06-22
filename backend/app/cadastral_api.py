@@ -575,6 +575,7 @@ def update_parcel(parcel_id):
     try:
         # Try to get tenant_id from Flask g (Keycloak auth) or request.environ (fallback)
         tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None) or request.environ.get('tenant_id')
+        user_id = getattr(g, 'user_id', None) or request.environ.get('user_id')
         data = request.json
         
         # Connect to database
@@ -663,6 +664,7 @@ def delete_parcel(parcel_id):
     try:
         # Try to get tenant_id from Flask g (Keycloak auth) or request.environ (fallback)
         tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None) or request.environ.get('tenant_id')
+        user_id = getattr(g, 'user_id', None) or request.environ.get('user_id')
         
         # Connect to database
         conn = psycopg2.connect(POSTGRES_URL)
