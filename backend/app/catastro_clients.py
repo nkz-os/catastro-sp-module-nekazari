@@ -200,7 +200,7 @@ class WFSCapabilitiesDiscovery:
         # Excluded keywords (administrative units, text, lines)
         excluded_keywords = [
             'municipio', 'concejo', 'cascourbano', 'poligono', 
-            'txt', 'lin_', 'line', 'pt_', 'text', 'edif'
+            'txt', 'lin_', 'line', 'pt_', 'text'
         ]
         
         primary_matches = []
@@ -2376,6 +2376,330 @@ class NavarraCatastroClient:
 
         except Exception as e:
             logger.error(f"Error parsing Navarra WFS XML: {e}")
+            return None
+
+    def query_buildings(
+        self,
+        bbox: tuple,
+        srs: str = "4326"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Query buildings from IDENA WFS with height extraction.
+
+        Uses WFS: https://idena.navarra.es/ogc/wfs
+        Primary layer: IDENA:CATAST_Pol_Edificacion - Building footprints (may have 3D geometry)
+        Fallback layer: IDENA:DIRECC_Pol_Edifaltura - Buildings with height attributes
+
+        Height extraction priority:
+        1. Z from 3D geometry (if polygon has Z coordinates)
+        2. ALTURA/altura/num_plantas attribute from building layer
+        3. Cross-reference with IDENA:CATAST_Txt_EdifAlturas by REFCAT/localId
+        4. Default 6.0m (2 floors)
+
+        Args:
+            bbox: Bounding box tuple (minx, miny, maxx, maxy)
+            srs: Spatial reference system (default: "4326")
+
+        Returns:
+            GeoJSON FeatureCollection with 'height' property, or None
+        """
+        wfs_url = self.WFS_BASE_URL
+
+        srs_code = str(srs)
+        if srs_code.upper().startswith("EPSG"):
+            srs_code = srs_code.split(":")[-1]
+        srs_name = f"EPSG::{srs_code}"
+
+        bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]},{srs_name}"
+
+        # Layer ordering: try primary building layer first
+        building_layers = [
+            'IDENA:CATAST_Pol_Edificacion',
+            'IDENA:DIRECC_Pol_Edifaltura',
+        ]
+
+        result_data = None
+        used_layer = None
+
+        for layer in building_layers:
+            params = {
+                'service': 'WFS',
+                'version': '2.0.0',
+                'request': 'GetFeature',
+                'typeNames': layer,
+                'srsName': srs_name,
+                'bbox': bbox_str,
+                'outputFormat': 'application/json',
+            }
+
+            logger.info(f"Querying IDENA buildings with layer: {layer}, bbox={bbox_str}")
+            try:
+                response = self.session.get(wfs_url, params=params, timeout=15)
+
+                if response.status_code == 200:
+                    content_type = response.headers.get('Content-Type', '')
+                    if 'json' in content_type.lower() or response.text.strip().startswith('{'):
+                        try:
+                            data = response.json()
+                            if data.get('features') and len(data['features']) > 0:
+                                result_data = data
+                                used_layer = layer
+                                logger.info(f"Found {len(data['features'])} buildings in layer {layer}")
+                                break
+                        except (ValueError, json.JSONDecodeError):
+                            logger.warning(f"JSON parse failed for {layer}")
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Request error for layer {layer}: {e}")
+                continue
+
+        if not result_data:
+            logger.warning("No buildings found in any IDENA layer")
+            return None
+
+        # Process features: extract height, build GeoJSON FeatureCollection
+        features = []
+        for feature in result_data.get('features', []):
+            props = feature.get('properties', {})
+            geometry = feature.get('geometry')
+
+            # Extract REFCAT/localId for cross-referencing
+            refcat = (
+                props.get('localId') or
+                props.get('REFCAT') or
+                props.get('id') or
+                props.get('codigo') or
+                feature.get('id', '')
+            )
+
+            height = self._extract_building_height(geometry, props, refcat, bbox, srs_name)
+
+            new_props = dict(props)
+            new_props['height'] = height
+
+            feat = {
+                'type': 'Feature',
+                'geometry': geometry,
+                'properties': new_props,
+            }
+            if feature.get('id') is not None:
+                feat['id'] = feature['id']
+
+            features.append(feat)
+
+        logger.info(f"Processed {len(features)} buildings with height from {used_layer}")
+        return {
+            'type': 'FeatureCollection',
+            'features': features
+        }
+
+    def _extract_building_height(
+        self,
+        geometry: Optional[Dict],
+        properties: Dict[str, Any],
+        refcat: Optional[str],
+        bbox: tuple,
+        srs_name: str
+    ) -> float:
+        """
+        Extract building height from geometry Z, attributes, or cross-reference.
+
+        Priority:
+        1. Z from 3D geometry
+        2. ALTURA/altura/num_plantas attribute
+        3. Cross-reference with CATAST_Txt_EdifAlturas
+        4. Default 6.0m
+        """
+        # Priority 1: Extract Z from 3D geometry
+        height = self._height_from_3d_geometry(geometry)
+        if height is not None:
+            logger.debug(f"Height from 3D geometry: {height}m")
+            return height
+
+        # Priority 2: Extract from attributes
+        height = self._height_from_attributes(properties)
+        if height is not None:
+            logger.debug(f"Height from attributes: {height}m")
+            return height
+
+        # Priority 3: Cross-reference with CATAST_Txt_EdifAlturas
+        if refcat:
+            height = self._height_from_altura_text(refcat, bbox, srs_name)
+            if height is not None:
+                logger.debug(f"Height from text cross-reference: {height}m")
+                return height
+
+        # Priority 4: Default
+        logger.debug(f"No height found, using default 6.0m for refcat={refcat}")
+        return 6.0
+
+    @staticmethod
+    def _height_from_3d_geometry(geometry: Optional[Dict]) -> Optional[float]:
+        """
+        Extract building height from 3D polygon geometry.
+
+        If polygon coordinates have Z values, height = max(Z) - min(Z).
+        Returns None if geometry is 2D or not available.
+        """
+        if not geometry:
+            return None
+
+        try:
+            coords = geometry.get('coordinates', [])
+            if not coords:
+                return None
+
+            # Handle both Polygon and MultiPolygon
+            polygons = []
+            if geometry.get('type') == 'Polygon':
+                polygons = [coords]
+            elif geometry.get('type') == 'MultiPolygon':
+                polygons = coords
+            else:
+                return None
+
+            z_values = []
+            for polygon in polygons:
+                if not polygon:
+                    continue
+                # First ring is exterior
+                ring = polygon[0] if isinstance(polygon[0], list) else polygon
+                for point in ring:
+                    if len(point) >= 3:
+                        z = point[2]
+                        if z is not None:
+                            z_values.append(float(z))
+
+            if len(z_values) >= 2:
+                raw_height = max(z_values) - min(z_values)
+                # Sanity check: reasonable building height (1-100m)
+                if 1.0 <= raw_height <= 100.0:
+                    return round(raw_height, 2)
+                elif raw_height < 1.0:
+                    # Very small Z range, likely not meaningful 3D
+                    return None
+                else:
+                    # Height > 100m, likely coordinate issue
+                    logger.warning(f"Unreasonable height from 3D geometry: {raw_height}m, ignoring")
+                    return None
+
+            return None
+        except (TypeError, ValueError, IndexError) as e:
+            logger.debug(f"Could not extract height from 3D geometry: {e}")
+            return None
+
+    @staticmethod
+    def _height_from_attributes(properties: Optional[Dict[str, Any]]) -> Optional[float]:
+        """
+        Extract building height from attributes.
+
+        Tries: ALTURA, altura, num_plantas, NUM_PLANTAS, height, HEIGHT, etc.
+        If floors found, height = floors * 3.0m.
+        If direct height found, use as-is.
+        """
+        if not properties:
+            return None
+
+        # Try direct height attributes (in meters)
+        for key in ('ALTURA', 'altura', 'height', 'HEIGHT', 'altura_edif', 'ALTURA_EDIF'):
+            val = properties.get(key)
+            if val is not None:
+                try:
+                    h = float(str(val).strip().replace(',', '.'))
+                    if 1.0 <= h <= 100.0:
+                        return round(h, 2)
+                except (ValueError, TypeError):
+                    continue
+
+        # Try floors/plantas (height = floors * 3.0m)
+        for key in ('num_plantas', 'NUM_PLANTAS', 'numPlantas',
+                    'numberOfFloorsAboveGround', 'plantas', 'PLANTAS', 'n_plantas'):
+            val = properties.get(key)
+            if val is not None:
+                try:
+                    floors = int(float(str(val).strip()))
+                    if floors > 0:
+                        return round(floors * 3.0, 2)
+                except (ValueError, TypeError):
+                    continue
+
+        return None
+
+    def _height_from_altura_text(
+        self,
+        refcat: str,
+        bbox: tuple,
+        srs_name: str
+    ) -> Optional[float]:
+        """
+        Cross-reference building with IDENA:CATAST_Txt_EdifAlturas by REFCAT/localId.
+
+        The text layer contains labels with altitude/height information.
+        Extracts numerical height from text content.
+        """
+        try:
+            params = {
+                'service': 'WFS',
+                'version': '2.0.0',
+                'request': 'GetFeature',
+                'typeNames': 'IDENA:CATAST_Txt_EdifAlturas',
+                'srsName': srs_name,
+                'bbox': f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]},{srs_name}",
+                'outputFormat': 'application/json',
+            }
+
+            response = self.session.get(self.WFS_BASE_URL, params=params, timeout=10)
+
+            if response.status_code != 200:
+                return None
+
+            is_json = ('json' in response.headers.get('Content-Type', '').lower()
+                       or response.text.strip().startswith('{'))
+            if not is_json:
+                return None
+
+            data = response.json()
+            if not data or not data.get('features'):
+                return None
+
+            # Normalize refcat for comparison
+            refcat_norm = refcat.replace('-', '').replace(' ', '').upper()
+
+            # Find matching feature by REFCAT/localId
+            for feat in data['features']:
+                props = feat.get('properties', {})
+                feat_refcat = (
+                    props.get('localId') or
+                    props.get('REFCAT') or
+                    props.get('id') or
+                    props.get('codigo') or
+                    ''
+                )
+
+                if not feat_refcat:
+                    continue
+
+                feat_refcat_norm = feat_refcat.replace('-', '').replace(' ', '').upper()
+
+                # Check if references match (full or partial)
+                if refcat_norm == feat_refcat_norm or refcat_norm in feat_refcat_norm or feat_refcat_norm in refcat_norm:
+                    # Extract height from text content
+                    text = (props.get('texto') or props.get('text')
+                            or props.get('altura') or props.get('ALTURA') or '')
+                    if text:
+                        # Try to find a number in the text (e.g., "7m", "7.5", "altura 7")
+                        numbers = re.findall(r'(\d+[.,]?\d*)', str(text))
+                        if numbers:
+                            try:
+                                val = float(numbers[0].replace(',', '.'))
+                                if 1.0 <= val <= 100.0:
+                                    return round(val, 2)
+                            except (ValueError, TypeError):
+                                pass
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error cross-referencing altura text layer: {e}")
             return None
 
 
