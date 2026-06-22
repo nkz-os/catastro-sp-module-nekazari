@@ -53,24 +53,7 @@ api_bp = Blueprint('api', __name__, url_prefix='/api/cadastral-api')
 # Orion-LD Synchronization Endpoint
 # =============================================================================
 
-# TODO(Task 3): Remove orion_sync imports — replacing with entity-manager API
-# Import sync functions
-try:
-    from orion_sync import (
-        extract_ngsi_ld_value,
-        extract_tenant_from_entity,
-        sync_parcel_to_postgres,
-        delete_parcel_from_postgres
-    )
-except ImportError:
-    logger.warning("orion_sync not available (deprecated — see orion_sync.py)")
-    # Define dummy functions to prevent crashes
-    def extract_ngsi_ld_value(attr): return attr
-    def extract_tenant_from_entity(entity): return None
-    def sync_parcel_to_postgres(*args, **kwargs): return False
-    def delete_parcel_from_postgres(*args, **kwargs): return False
-
-# Entity-manager client — sole write path for AgriParcel (Task 3)
+# Entity-manager client — sole write path for AgriParcel
 try:
     from entity_client import create_parcel as em_create_parcel
     from entity_client import update_parcel as em_update_parcel
