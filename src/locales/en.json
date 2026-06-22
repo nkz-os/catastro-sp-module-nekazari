@@ -16,6 +16,9 @@
     "authenticatedAs": "Authenticated as",
     "tenant": "Tenant"
   },
+  "layer": {
+    "buildings3d": "3D Buildings"
+  },
   "geosearch": {
     "searchLocation": "Search location",
     "placeholder": "Search city, province or postal code...",
