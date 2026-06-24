@@ -57,13 +57,10 @@ api_bp = Blueprint('api', __name__, url_prefix='/api/cadastral-api')
 # Entity-manager client — sole write path for AgriParcel
 try:
     from entity_client import create_parcel as em_create_parcel
-    from entity_client import update_parcel as em_update_parcel
-    from entity_client import delete_parcel as em_delete_parcel
 except ImportError:
     logger.warning("entity_client not available — entity-manager writes disabled")
     def em_create_parcel(*args, **kwargs): return None
-    def em_update_parcel(*args, **kwargs): return False
-    def em_delete_parcel(*args, **kwargs): return False
+
 
 # Import cadastral clients and region router
 try:
@@ -569,138 +566,9 @@ def get_parcel(parcel_id):
         logger.error(f"Error getting parcel: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
-@api_bp.route('/parcels/<parcel_id>', methods=['PUT'])
-@require_auth
-def update_parcel(parcel_id):
-    """Update a parcel"""
-    try:
-        # Try to get tenant_id from Flask g (Keycloak auth) or request.environ (fallback)
-        tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None) or request.environ.get('tenant_id')
-        user_id = getattr(g, 'user_id', None) or request.environ.get('user_id')
-        data = request.json
-        
-        # Connect to database
-        conn = psycopg2.connect(POSTGRES_URL)
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        # Set tenant context
-        cur.execute("SELECT set_config('app.current_tenant', %s, false)", (tenant_id,))
-        
-        # ---- Primary write: entity-manager (SoT) ----
-        em_payload = {}
-        if 'crop_type' in data:
-            em_payload['cropType'] = {'type': 'Property', 'value': data['crop_type']}
-        if 'notes' in data:
-            em_payload['description'] = {'type': 'Property', 'value': data['notes']}
-        if 'cadastral_reference' in data:
-            em_payload['cadastralReference'] = {'type': 'Property', 'value': data['cadastral_reference']}
-        if 'geometry' in data:
-            geometry = data['geometry']
-            if geometry.get('type') != 'Polygon':
-                return jsonify({'error': 'Invalid geometry type'}), 400
-            em_payload['location'] = {'type': 'GeoProperty', 'value': geometry}
-
-        if em_payload:
-            em_success = em_update_parcel(tenant_id, parcel_id, em_payload, user_id or 'anonymous')
-            if not em_success:
-                logger.warning('entity-manager update failed — updating PostGIS only')
-
-        # ---- Secondary write: PostGIS read-model ----
-        updates = []
-        values = []
-        
-        allowed_fields = ['crop_type', 'notes', 'ndvi_enabled', 'analytics_enabled', 'tags', 'cadastral_reference']
-        for field in allowed_fields:
-            if field in data:
-                updates.append(f"{field} = %s")
-                values.append(data[field])
-        
-        # Handle geometry update
-        if 'geometry' in data:
-            geometry = data['geometry']
-            if geometry.get('type') != 'Polygon':
-                return jsonify({'error': 'Invalid geometry type'}), 400
-            updates.append("geometry = ST_GeomFromGeoJSON(%s)")
-            values.append(json.dumps(geometry))
-        
-        if not updates and not em_payload:
-            return jsonify({'error': 'No fields to update'}), 400
-
-        if updates:
-            # Add parcel_id to values
-            values.append(parcel_id)
-            
-            # Execute update
-            query = f"""
-                UPDATE cadastral_parcels
-                SET {', '.join(updates)}
-                WHERE id = %s
-                RETURNING id
-            """
-            cur.execute(query, values)
-            
-            updated = cur.fetchone()
-            conn.commit()
-            cur.close()
-            conn.close()
-            
-            if not updated:
-                return jsonify({'error': 'Parcel not found'}), 404
-        else:
-            # Only entity-manager update happened
-            cur.close()
-            conn.close()
-        
-        logger.info(f"Updated parcel {parcel_id} for tenant {tenant_id}")
-        return jsonify({'message': 'Parcel updated successfully'}), 200
-        
-    except Exception as e:
-        logger.error(f"Error updating parcel: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
-
-@api_bp.route('/parcels/<parcel_id>', methods=['DELETE'])
-@require_auth
-def delete_parcel(parcel_id):
-    """Soft delete a parcel (set is_active = false)"""
-    try:
-        # Try to get tenant_id from Flask g (Keycloak auth) or request.environ (fallback)
-        tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None) or request.environ.get('tenant_id')
-        user_id = getattr(g, 'user_id', None) or request.environ.get('user_id')
-        
-        # Connect to database
-        conn = psycopg2.connect(POSTGRES_URL)
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        # ---- Primary delete: entity-manager (SoT) ----
-        em_success = em_delete_parcel(tenant_id, parcel_id, user_id or 'anonymous')
-        if not em_success:
-            logger.warning('entity-manager delete failed — proceeding with PostGIS soft-delete')
-
-        # Set tenant context
-        cur.execute("SELECT set_config('app.current_tenant', %s, false)", (tenant_id,))
-        
-        # Soft delete
-        cur.execute("""
-            UPDATE cadastral_parcels
-            SET is_active = false
-            WHERE id = %s
-            RETURNING id
-        """, (parcel_id,))
-        
-        deleted = cur.fetchone()
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        if not deleted:
-            return jsonify({'error': 'Parcel not found'}), 404
-        
-        logger.info(f"Deleted parcel {parcel_id} for tenant {tenant_id}")
-        return jsonify({'message': 'Parcel deleted successfully'}), 200
-        
-    except Exception as e:
-        logger.error(f"Error deleting parcel: {e}")
-        return jsonify({'error': 'Internal server error'}), 500
+# Parcel update and delete are owned by entity-manager (PATCH/DELETE
+# /api/entities/parcels/{id}); the former direct read-model writes were removed
+# to preserve the single-source-of-truth invariant.
 
 @api_bp.route('/parcels/summary', methods=['GET'])
 @require_auth
