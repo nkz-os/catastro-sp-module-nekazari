@@ -92,7 +92,7 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
     } catch (err) {
       console.error('[CadastralBuildingLayer] Failed to load buildings:', err);
     }
-  }, [viewer, isVisible, parcelId]);
+  }, [viewer, isVisible, isViewerReady, parcelId]);
 
   useEffect(() => {
     loadBuildings();
@@ -102,7 +102,7 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
         dsRef.current = null;
       }
     };
-  }, [loadBuildings, viewer]);
+  }, [loadBuildings, viewer, isViewerReady]);
 
   return null; // invisible — renders via Cesium data sources
 };
