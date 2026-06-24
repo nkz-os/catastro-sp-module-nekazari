@@ -76,6 +76,7 @@ export const GeoSearchBar: React.FC = () => {
     const { t } = useTranslation('cadastral');
     const viewerContext = useViewerOptional();
     const cesiumViewer = viewerContext?.cesiumViewer;
+    const isViewerReady = viewerContext?.isViewerReady !== false;
 
     const [isExpanded, setIsExpanded] = useState(false);
     const [query, setQuery] = useState('');
@@ -154,7 +155,7 @@ export const GeoSearchBar: React.FC = () => {
 
     const flyToResult = useCallback(
         (result: NominatimResult) => {
-            if (!cesiumViewer) return;
+            if (!cesiumViewer || !isViewerReady) return;
 
             // @ts-ignore - Cesium on window
             const Cesium = window.Cesium;
@@ -220,7 +221,7 @@ export const GeoSearchBar: React.FC = () => {
     // -----------------------------------------------------------------------
     // Don't render if no viewer
     // -----------------------------------------------------------------------
-    if (!cesiumViewer) return null;
+    if (!cesiumViewer || !isViewerReady) return null;
 
     // -----------------------------------------------------------------------
     // Render — collapsed icon button
