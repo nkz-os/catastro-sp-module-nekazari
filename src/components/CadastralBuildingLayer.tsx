@@ -11,7 +11,7 @@ const API_BASE = (import.meta as any).env?.VITE_API_URL || 'https://nkz.robotika
 export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcelId }) => {
   const viewerCtx = useViewerOptional();
   const viewer = viewerCtx?.cesiumViewer ?? null;
-  const isViewerReady = viewerCtx?.isViewerReady ?? false;
+  const isViewerReady = viewerCtx?.isViewerReady !== false;
   const dsRef = useRef<any>(null);
   const [internalVisible, setInternalVisible] = useState(visible);
 

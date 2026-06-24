@@ -62,7 +62,7 @@ export const CadastralMapClickHandler: React.FC = () => {
   const { t } = useTranslation('cadastral');
   const viewerContext = useViewerOptional();
   const cesiumViewer = viewerContext?.cesiumViewer;
-  const isViewerReady = viewerContext?.isViewerReady ?? false;
+  const isViewerReady = viewerContext?.isViewerReady !== false;
   const { isClickEnabled } = useCadastral();
   const [isProcessing, setIsProcessing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
