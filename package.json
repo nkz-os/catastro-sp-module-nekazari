@@ -16,6 +16,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
+  "_mfVitePin": "@module-federation/vite must stay ≤1.16.8 — resolved via @nekazari/module-builder. >=1.16.9 breaks host (circular react⇄design-tokens, incident 2026-06-24, PR #703). Verify on module-builder bumps: grep @module-federation/vite pnpm-lock.yaml",
   "dependencies": {
     "@nekazari/design-tokens": "^0.1.0-alpha.0",
     "@nekazari/sdk": "^1.0.3",
