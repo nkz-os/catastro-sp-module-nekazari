@@ -31,7 +31,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ghcr.io/nkz-os/nkz-module-cadastral-spain/backend@sha256:0855ba5acdb67a93d91d764c7aba471e02185189520f7cd42f855fc8ca370d6b  # feat: 3D buildings + FIWARE revival
+          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-backend:edf452b  # fix: catastro remediation (HMAC, PUT/DELETE removal, isViewerReady guards)
           imagePullPolicy: Always
           ports:
             - name: http
@@ -53,6 +53,13 @@ spec:
               value: "nekazari"
             - name: JWT_AUDIENCE
               value: "account"
+            # Service-to-service HMAC auth
+            - name: HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: secret
+                  optional: true
             # Service-to-service auth (optional)
             - name: MODULE_MANAGEMENT_KEY
               valueFrom:
@@ -66,7 +73,7 @@ spec:
                 secretKeyRef:
                   name: postgresql-secret
                   key: postgres-url
-            # Entity Manager URL (for NDVI job orchestration)
+            # Entity Manager URL
             - name: ENTITY_MANAGER_URL
               value: "http://entity-manager-service:5000"
           resources:
