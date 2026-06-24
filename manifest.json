@@ -44,8 +44,8 @@
     "external_requests": []
   },
   "build_config": {
-    "type": "iife",
-    "remote_entry_url": "/modules/catastro-spain/nkz-module.js"
+    "type": "module-federation",
+    "remote_entry_url": "/modules/catastro-spain/remoteEntry.js"
   },
   "slots": {
     "map-layer": ["CadastralMapClickHandler", "GeoSearchBar"],
@@ -69,6 +69,12 @@
             "moduleId": "catastro-spain",
             "component": "GeoSearchBar",
             "priority": 50
+          },
+          {
+            "id": "catastro-spain-building-layer",
+            "moduleId": "catastro-spain",
+            "component": "CadastralBuildingLayer",
+            "priority": 90
           }
         ],
         "layer-toggle": [
@@ -77,6 +83,12 @@
             "moduleId": "catastro-spain",
             "component": "CadastralClickToggle",
             "priority": 20
+          },
+          {
+            "id": "catastro-spain-buildings-toggle",
+            "moduleId": "catastro-spain",
+            "component": "CadastralBuildingsToggle",
+            "priority": 15
           }
         ],
         "context-panel": [],
