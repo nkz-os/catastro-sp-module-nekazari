@@ -11,6 +11,7 @@ const API_BASE = (import.meta as any).env?.VITE_API_URL || 'https://nkz.robotika
 export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcelId }) => {
   const viewerCtx = useViewerOptional();
   const viewer = viewerCtx?.cesiumViewer ?? null;
+  const isViewerReady = viewerCtx?.isViewerReady ?? false;
   const dsRef = useRef<any>(null);
   const [internalVisible, setInternalVisible] = useState(visible);
 
@@ -26,7 +27,7 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
   const isVisible = visible ?? internalVisible;
 
   const loadBuildings = useCallback(async () => {
-    if (!viewer || !isVisible) return;
+    if (!viewer || !isViewerReady || !isVisible) return;
     const Cesium = (window as any).Cesium;
     if (!Cesium) return;
 
@@ -96,7 +97,7 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
   useEffect(() => {
     loadBuildings();
     return () => {
-      if (dsRef.current && viewer) {
+      if (dsRef.current && viewer && isViewerReady) {
         viewer.dataSources.remove(dsRef.current);
         dsRef.current = null;
       }
