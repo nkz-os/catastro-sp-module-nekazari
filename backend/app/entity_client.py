@@ -20,6 +20,7 @@ import json
 import hashlib
 import hmac
 import logging
+import time
 from typing import Any, Optional
 
 import requests
@@ -43,15 +44,17 @@ WORKER_USER_ID = os.getenv('CADASTRAL_WORKER_USER', 'catastro-worker')
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _hmac_signature(tenant_id: str, user_id: str) -> str:
-    """Generate HMAC-SHA256 for tenant_id:user_id pair."""
+def _hmac_signature(token: str, tenant_id: str) -> str:
+    """Generate canonical HMAC-SHA256: payload={token}|{tenant_id}|{ts}, output={sig}:{ts}
+
+    Aligned with services/common/keycloak_auth.py:generate_hmac_signature.
+    """
     if not HMAC_SECRET:
         return ''
-    return hmac.new(
-        HMAC_SECRET.encode(),
-        f'{tenant_id}:{user_id}'.encode(),
-        hashlib.sha256,
-    ).hexdigest()
+    timestamp = int(time.time())
+    payload = f'{token}|{tenant_id}|{timestamp}'
+    sig = hmac.new(HMAC_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f'{sig}:{timestamp}'
 
 
 def _headers(tenant_id: str, user_id: str) -> dict[str, str]:
@@ -61,7 +64,7 @@ def _headers(tenant_id: str, user_id: str) -> dict[str, str]:
     there is no end-user Bearer token — catastro-worker signs
     via HMAC directly.
     """
-    signature = _hmac_signature(tenant_id, user_id)
+    signature = _hmac_signature('', tenant_id)  # token='' for internal service-to-service
     return {
         'X-Tenant-ID': tenant_id,
         'X-User-ID': user_id,
