@@ -15,6 +15,7 @@ import os
 import hashlib
 import hmac
 import logging
+import time
 from functools import wraps
 
 from flask import request, jsonify, g
@@ -45,37 +46,79 @@ def _should_skip_auth(path: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# HMAC helpers
+# HMAC helpers — canonical format (aligned with keycloak_auth.py)
+#
+# Platform-wide HMAC format (MANDATORY):
+#   Internal payload: {data}|{tenant_id}|{timestamp}   (pipe-separated)
+#   Output:           {HMAC-SHA256 hexdigest}:{timestamp} (colon-separated, sig first)
+#   Algorithm:        HMAC-SHA256, full hex digest (64 chars), NO truncation
+#   Verification:     hmac.compare_digest() + timestamp window (5 min)
+#
+# See services/common/keycloak_auth.py for the canonical reference.
 # ---------------------------------------------------------------------------
 
-def generate_hmac_signature(token: str, tenant_id: str) -> str:
-    """Generate an HMAC-SHA256 signature for a token + tenant pair.
 
-    Mirrors exactly what api-gateway does in generate_hmac_signature().
-    """
+def _generate_timestamped_signature(token: str, tenant_id: str, timestamp: int) -> str:
+    """Generate HMAC-SHA256 signature for given token+tenant+timestamp."""
     if not HMAC_SECRET:
         return ''
+    # Pipe separator matches keycloak_auth.py
+    payload = f'{token}|{tenant_id}|{timestamp}'
     return hmac.new(
         HMAC_SECRET.encode(),
-        f'{token}:{tenant_id}'.encode(),
+        payload.encode(),
         hashlib.sha256,
     ).hexdigest()
 
 
-def _validate_hmac(
-    signature: str,
-    token: str,
-    tenant_id: str,
-    user_id: str,
-) -> bool:
-    """Validate that *signature* matches the expected HMAC for token+tenant.
+def generate_hmac_signature(token: str, tenant_id: str) -> str:
+    """Generate an HMAC-SHA256 signature for a token + tenant pair.
+
+    Canonical platform format (mirrors keycloak_auth.py:generate_hmac_signature):
+      payload  = {token}|{tenant_id}|{timestamp}
+      output   = {hexdigest}:{timestamp}
+
+    Returns:
+        Empty string if HMAC_SECRET not configured, else "{sig}:{timestamp}".
+    """
+    if not HMAC_SECRET:
+        return ''
+    timestamp = int(time.time())
+    sig = _generate_timestamped_signature(token, tenant_id, timestamp)
+    return f'{sig}:{timestamp}'
+
+
+def _validate_hmac(signature: str, token: str, tenant_id: str, user_id: str) -> bool:
+    """Validate an HMAC signature against the canonical platform format.
+
+    Parses "{sig}:{timestamp}", verifies HMAC and checks timestamp is
+    within 5-minute window (matching keycloak_auth.py:verify_hmac_signature).
 
     Returns True when valid or when HMAC validation is disabled.
     """
     if not REQUIRE_HMAC or not HMAC_SECRET:
         return True  # validation disabled
-    expected = generate_hmac_signature(token, tenant_id)
-    return hmac.compare_digest(signature, expected)
+
+    try:
+        parts = signature.split(':')
+        if len(parts) != 2:
+            logger.warning('Invalid HMAC signature format (expected sig:ts)')
+            return False
+
+        provided_sig, timestamp_str = parts
+        timestamp = int(timestamp_str)
+
+        # Check 5-minute window
+        if abs(int(time.time()) - timestamp) > 300:
+            logger.warning('HMAC signature timestamp outside 5min window')
+            return False
+
+        expected = _generate_timestamped_signature(token, tenant_id, timestamp)
+        return hmac.compare_digest(provided_sig, expected)
+
+    except (ValueError, IndexError) as e:
+        logger.warning('HMAC validation error: %s', e)
+        return False
 
 
 # ---------------------------------------------------------------------------
