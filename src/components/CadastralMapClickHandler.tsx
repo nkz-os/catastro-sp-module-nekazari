@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useViewerOptional } from '@nekazari/sdk';
 import { useTranslation } from '@nekazari/sdk';
-import { cadastralApi, CadastralData } from '../services/cadastralApi';
-import { parcelApi } from '../services/parcelApi';
+import { getCadastralApi, CadastralData } from '../services/cadastralApi';
+import { getParcelApi } from '../services/parcelApi';
 import { CheckCircle, XCircle, Loader2, Clock } from 'lucide-react';
 import { useCadastral } from '../context/CadastralContext';
 import { CadastralConfirmDialog } from './CadastralConfirmDialog';
@@ -268,7 +268,7 @@ export const CadastralMapClickHandler: React.FC = () => {
 
     try {
       console.log('[CadastralMapClickHandler] Querying cadastral service...');
-      const cadastralData = await cadastralApi.queryByCoordinates(longitude, latitude);
+      const cadastralData = await getCadastralApi().queryByCoordinates(longitude, latitude);
 
       // Clear timer on success
       if (timerRef.current) {
@@ -441,7 +441,7 @@ export const CadastralMapClickHandler: React.FC = () => {
       const cadastralReference = cadastralData.cadastralReference || '';
 
       if (cadastralReference) {
-        const alreadyExists = await parcelApi.findByCadastralReference(cadastralReference);
+        const alreadyExists = await getParcelApi().findByCadastralReference(cadastralReference);
         if (alreadyExists) {
           setNotification({
             type: 'warning',
@@ -469,7 +469,7 @@ export const CadastralMapClickHandler: React.FC = () => {
         ndviEnabled: true,
       };
 
-      await parcelApi.createParcel(newParcel);
+      await getParcelApi().createParcel(newParcel);
 
       pendingParcelRef.current = null;
       setPendingParcel(null);

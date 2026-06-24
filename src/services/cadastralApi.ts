@@ -70,5 +70,9 @@ class CadastralApiService {
   }
 }
 
-export const cadastralApi = new CadastralApiService();
+let _cadastralApi: CadastralApiService | null = null;
+export const getCadastralApi = (): CadastralApiService => {
+  if (!_cadastralApi) _cadastralApi = new CadastralApiService();
+  return _cadastralApi;
+};
 

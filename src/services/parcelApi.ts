@@ -117,5 +117,9 @@ class ParcelApiService {
   }
 }
 
-export const parcelApi = new ParcelApiService();
+let _parcelApi: ParcelApiService | null = null;
+export const getParcelApi = (): ParcelApiService => {
+  if (!_parcelApi) _parcelApi = new ParcelApiService();
+  return _parcelApi;
+};
 
