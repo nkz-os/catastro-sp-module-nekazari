@@ -62,6 +62,7 @@ export const CadastralMapClickHandler: React.FC = () => {
   const { t } = useTranslation('cadastral');
   const viewerContext = useViewerOptional();
   const cesiumViewer = viewerContext?.cesiumViewer;
+  const isViewerReady = viewerContext?.isViewerReady ?? false;
   const { isClickEnabled } = useCadastral();
   const [isProcessing, setIsProcessing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -189,7 +190,7 @@ export const CadastralMapClickHandler: React.FC = () => {
 
   // Render pending parcel on map
   useEffect(() => {
-    if (!cesiumViewer || !pendingParcel) return;
+    if (!cesiumViewer || !isViewerReady || !pendingParcel) return;
 
     // @ts-ignore
     const Cesium = window.Cesium;
@@ -227,11 +228,11 @@ export const CadastralMapClickHandler: React.FC = () => {
     }
 
     return () => {
-      if (entity) {
+      if (entity && cesiumViewer && isViewerReady) {
         cesiumViewer.entities.remove(entity);
       }
     };
-  }, [cesiumViewer, pendingParcel]);
+  }, [cesiumViewer, isViewerReady, pendingParcel]);
 
   // Helper to create Cesium hierarchy from GeoJSON
   const createCesiumHierarchy = (Cesium: any, geometry: any) => {
