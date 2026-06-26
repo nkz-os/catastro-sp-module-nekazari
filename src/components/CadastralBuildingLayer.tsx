@@ -27,13 +27,17 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
   const isVisible = visible ?? internalVisible;
 
   const loadBuildings = useCallback(async () => {
-    if (!viewer || !isViewerReady || !isVisible) return;
+    // A destroyed viewer is still truthy; touching .dataSources/.camera then
+    // throws "_cesiumWidget is undefined". Guard on isDestroyed().
+    if (!viewer || viewer.isDestroyed?.() || !isViewerReady || !isVisible) return;
     const Cesium = (window as any).Cesium;
     if (!Cesium) return;
 
     // Clean up previous data source
-    if (dsRef.current) {
-      viewer.dataSources.remove(dsRef.current);
+    if (dsRef.current && !viewer.isDestroyed?.()) {
+      try {
+        viewer.dataSources.remove(dsRef.current);
+      } catch { /* viewer torn down mid-flight */ }
       dsRef.current = null;
     }
 
@@ -67,8 +71,10 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
       if (!resp.ok) return;
       const geojson = await resp.json();
       if (!geojson.features || geojson.features.length === 0) return;
+      if (viewer.isDestroyed?.()) return;
 
       await ds.load(geojson, { clampToGround: true });
+      if (viewer.isDestroyed?.()) return;
 
       // Apply extrudedHeight styling to each entity
       const entities = ds.entities.values;
@@ -97,8 +103,10 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
   useEffect(() => {
     loadBuildings();
     return () => {
-      if (dsRef.current && viewer && isViewerReady) {
-        viewer.dataSources.remove(dsRef.current);
+      if (dsRef.current && viewer && !viewer.isDestroyed?.()) {
+        try {
+          viewer.dataSources.remove(dsRef.current);
+        } catch { /* viewer torn down */ }
         dsRef.current = null;
       }
     };
