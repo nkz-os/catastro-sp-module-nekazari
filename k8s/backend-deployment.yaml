@@ -31,7 +31,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-backend:edf452b  # fix: catastro remediation (HMAC, PUT/DELETE removal, isViewerReady guards)
+          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-backend:36da10bf17a9c6736a28205c71dcab3dfe3fbb92  # fix: blueprint registration for gunicorn
           imagePullPolicy: Always
           ports:
             - name: http
