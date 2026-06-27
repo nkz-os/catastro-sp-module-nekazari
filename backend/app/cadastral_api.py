@@ -1262,8 +1262,9 @@ def get_parcel_buildings(parcel_id):
     return jsonify({'type': 'FeatureCollection', 'features': filtered}), 200
 
 
+# Register blueprint (must be at module level — gunicorn never sees __main__)
+app.register_blueprint(api_bp)
+
 if __name__ == '__main__':
-    # Register blueprint
-    app.register_blueprint(api_bp)
     app.run(host='0.0.0.0', port=5000, debug=True)
 
