@@ -8,12 +8,12 @@ interface Props {
 
 const API_BASE = (import.meta as any).env?.VITE_API_URL || 'https://nkz.robotika.cloud';
 
-export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcelId }) => {
+export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) => {
   const viewerCtx = useViewerOptional();
   const viewer = viewerCtx?.cesiumViewer ?? null;
   const isViewerReady = viewerCtx?.isViewerReady !== false;
   const dsRef = useRef<any>(null);
-  const [internalVisible, setInternalVisible] = useState(visible);
+  const [internalVisible, setInternalVisible] = useState(false);
 
   // Listen for toggle events from CadastralBuildingsToggle
   useEffect(() => {
@@ -24,7 +24,7 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
     return () => window.removeEventListener('cadastral:buildings-toggle', handler as EventListener);
   }, []);
 
-  const isVisible = visible ?? internalVisible;
+  const isVisible = visible !== undefined ? visible : internalVisible;
 
   const loadBuildings = useCallback(async () => {
     // A destroyed viewer is still truthy; touching .dataSources/.camera then
@@ -51,7 +51,11 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
       } else {
         const rect = viewer.camera.computeViewRectangle();
         if (rect) {
-          params.set('bbox', `${rect.west},${rect.south},${rect.east},${rect.north}`);
+          const west = Cesium.Math.toDegrees(rect.west);
+          const south = Cesium.Math.toDegrees(rect.south);
+          const east = Cesium.Math.toDegrees(rect.east);
+          const north = Cesium.Math.toDegrees(rect.north);
+          params.set('bbox', `${west},${south},${east},${north}`);
         }
       }
 
@@ -101,6 +105,30 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
   }, [viewer, isVisible, isViewerReady, parcelId]);
 
   useEffect(() => {
+    if (!viewer || viewer.isDestroyed?.() || !isViewerReady) return;
+
+    const onCameraMoveEnd = () => {
+      if (isVisible) loadBuildings();
+    };
+    viewer.camera.moveEnd.addEventListener(onCameraMoveEnd);
+    return () => {
+      if (!viewer.isDestroyed?.()) {
+        viewer.camera.moveEnd.removeEventListener(onCameraMoveEnd);
+      }
+    };
+  }, [viewer, isViewerReady, isVisible, loadBuildings]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      if (dsRef.current && viewer && !viewer.isDestroyed?.()) {
+        try {
+          viewer.dataSources.remove(dsRef.current);
+        } catch { /* viewer torn down */ }
+        dsRef.current = null;
+      }
+      return;
+    }
+
     loadBuildings();
     return () => {
       if (dsRef.current && viewer && !viewer.isDestroyed?.()) {
@@ -110,7 +138,7 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible = true, parcel
         dsRef.current = null;
       }
     };
-  }, [loadBuildings, viewer, isViewerReady]);
+  }, [loadBuildings, viewer, isViewerReady, isVisible]);
 
   return null; // invisible — renders via Cesium data sources
 };
