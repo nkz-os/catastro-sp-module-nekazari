@@ -158,20 +158,20 @@ def require_auth(f):
 
         # ---- HMAC signature validation ----
         if REQUIRE_HMAC and HMAC_SECRET:
-            if not signature:
+            if signature:
+                token_for_hmac = token or ''
+                if not _validate_hmac(signature, token_for_hmac, tenant_id, user_id or ''):
+                    logger.warning(
+                        'Invalid X-Auth-Signature for tenant %s',
+                        tenant_id,
+                    )
+                    return jsonify({'error': 'Missing or invalid signature'}), 401
+            elif not token:
                 logger.warning(
-                    'Missing X-Auth-Signature for tenant %s',
+                    'Missing X-Auth-Signature and JWT for tenant %s',
                     tenant_id,
                 )
                 return jsonify({'error': 'Missing or invalid signature'}), 401
-            token_for_hmac = token or ''
-            expected = generate_hmac_signature(token_for_hmac, tenant_id)
-            if not hmac.compare_digest(signature, expected):
-                logger.warning(
-                    'Invalid X-Auth-Signature for tenant %s',
-                    tenant_id,
-                )
-                return jsonify({'error': 'Invalid signature'}), 401
 
         # ---- JWT decode (best-effort for user info) ----
         current_user = None
