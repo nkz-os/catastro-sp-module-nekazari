@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useViewerOptional } from '@nekazari/sdk';
+import { getCadastralApi } from '../services/cadastralApi';
 
 interface Props {
   visible?: boolean;
   parcelId?: string;
 }
-
-const API_BASE = (import.meta as any).env?.VITE_API_URL || 'https://nkz.robotika.cloud';
 
 export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) => {
   const viewerCtx = useViewerOptional();
@@ -61,19 +60,10 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) =
 
       if (!params.has('bbox') && !params.has('parcel_id')) return;
 
-      // Get auth token from cookie
-      const getToken = () => {
-        const match = document.cookie.match(/(?:^|;\s*)nkz_token=([^;]*)/);
-        return match ? match[1] : '';
-      };
-      const token = getToken();
-
-      const resp = await fetch(`${API_BASE}/api/cadastral-api/buildings?${params}`, {
-        credentials: 'include',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      const geojson = await getCadastralApi().getBuildings({
+        bbox: params.get('bbox') ?? undefined,
+        parcelId: params.get('parcel_id') ?? undefined,
       });
-      if (!resp.ok) return;
-      const geojson = await resp.json();
       if (!geojson.features || geojson.features.length === 0) return;
       if (viewer.isDestroyed?.()) return;
 
