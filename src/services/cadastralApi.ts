@@ -68,6 +68,18 @@ class CadastralApiService {
     });
     return response;
   }
+
+  async getBuildings(params: { bbox?: string; parcelId?: string }): Promise<{
+    type: string;
+    features: unknown[];
+  }> {
+    const qs = new URLSearchParams();
+    if (params.bbox) qs.set('bbox', params.bbox);
+    if (params.parcelId) qs.set('parcel_id', params.parcelId);
+    return this.client.get(`/buildings?${qs.toString()}`, {
+      headers: { Accept: 'application/json' },
+    });
+  }
 }
 
 let _cadastralApi: CadastralApiService | null = null;
