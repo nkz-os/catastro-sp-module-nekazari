@@ -1,11 +1,11 @@
 # =============================================================================
-# Catastro Spain Backend Deployment
+# Catastro Spain Backend Deployment (template)
 # =============================================================================
-# Backend API service for Catastro Spain module
+# Production image pins: gitops-config/overlays/modules/catastro-sp/
+# Do not apply this file in production — use the gitops-config overlay.
 # =============================================================================
 
 ---
-# Deployment: Catastro Spain Backend Service
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,7 +17,6 @@ metadata:
     module: catastro-spain
     nekazari.io/profile: addon
 spec:
-  # Restored — FIWARE compliance + entity-manager routing + 3D buildings
   replicas: 1
   selector:
     matchLabels:
@@ -31,11 +30,15 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-backend:36da10bf17a9c6736a28205c71dcab3dfe3fbb92  # fix: blueprint registration for gunicorn
+          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-backend:REPLACE_WITH_GIT_SHA
           imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: catastro-sp-config
+                optional: true
           env:
             - name: APP_NAME
               value: "Catastro Spain"
@@ -43,7 +46,6 @@ spec:
               value: "false"
             - name: API_PREFIX
               value: "/api/cadastral-api"
-            # Keycloak Configuration
             - name: KEYCLOAK_URL
               valueFrom:
                 configMapKeyRef:
@@ -53,27 +55,23 @@ spec:
               value: "nekazari"
             - name: JWT_AUDIENCE
               value: "account"
-            # Service-to-service HMAC auth
             - name: HMAC_SECRET
               valueFrom:
                 secretKeyRef:
                   name: jwt-secret
                   key: secret
                   optional: true
-            # Service-to-service auth (optional)
             - name: MODULE_MANAGEMENT_KEY
               valueFrom:
                 secretKeyRef:
                   name: module-secrets
                   key: management-key
                   optional: true
-            # Database connection
             - name: POSTGRES_URL
               valueFrom:
                 secretKeyRef:
                   name: postgresql-secret
                   key: postgres-url
-            # Entity Manager URL
             - name: ENTITY_MANAGER_URL
               value: "http://entity-manager-service:5000"
           resources:
@@ -107,7 +105,6 @@ spec:
             timeoutSeconds: 1
 
 ---
-# Service: Catastro Spain Backend API
 apiVersion: v1
 kind: Service
 metadata:
