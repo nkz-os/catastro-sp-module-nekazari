@@ -1,11 +1,11 @@
 # =============================================================================
-# Catastro Spain Frontend Deployment
+# Catastro Spain Frontend Deployment (template)
 # =============================================================================
-# Frontend service for Catastro Spain module
+# Production image pins: gitops-config/overlays/modules/catastro-sp/
+# Live UI is MF2 via MinIO OIDC publish. Legacy nginx kept for local dev only.
 # =============================================================================
 
 ---
-# Deployment: Catastro Spain Frontend Service
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,7 +17,6 @@ metadata:
     module: catastro-spain
     nekazari.io/profile: addon
 spec:
-  # Restored alongside backend
   replicas: 1
   selector:
     matchLabels:
@@ -31,7 +30,7 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-frontend-auto@sha256:080df2257533d2e3fcc1db164f8ee2d89d25d6bc088e03437d16dd89af614bce  # PR #4: parcelApi writes via entity-manager (MF2 remote is the live FE path)
+          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-frontend-auto:REPLACE_WITH_GIT_SHA
           imagePullPolicy: Always
           ports:
             - name: http
@@ -57,7 +56,6 @@ spec:
             periodSeconds: 10
 
 ---
-# Service: Catastro Spain Frontend
 apiVersion: v1
 kind: Service
 metadata:
