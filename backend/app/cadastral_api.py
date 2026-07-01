@@ -424,8 +424,8 @@ def create_parcel():
         # ---- Primary write: entity-manager (SoT) ----
         em_id = em_create_parcel(tenant_id, ngsi_ld_entity, user_id or 'anonymous')
         if not em_id:
-            logger.error('entity-manager create failed — falling back to PostGIS-only')
-            # Fall through to PostGIS (best-effort for dev/staging)
+            logger.error('entity-manager create failed — refusing PostGIS-only fallback')
+            return jsonify({'error': 'Failed to create parcel in entity-manager'}), 502
 
         # ---- Secondary write: local PostGIS read-model ----
         conn = None
