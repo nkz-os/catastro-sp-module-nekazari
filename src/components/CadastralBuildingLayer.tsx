@@ -9,10 +9,11 @@ interface Props {
 
 const DEFAULT_BUILDING_HEIGHT_M = 5;
 
-export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) => {
+export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId: parcelIdProp }) => {
   const viewerCtx = useViewerOptional();
   const viewer = viewerCtx?.cesiumViewer ?? null;
   const isViewerReady = viewerCtx?.isViewerReady !== false;
+  const selectedEntityId = viewerCtx?.selectedEntityId ?? null;
   const dsRef = useRef<any>(null);
   const [internalVisible, setInternalVisible] = useState(false);
 
@@ -26,6 +27,12 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) =
   }, []);
 
   const isVisible = visible !== undefined ? visible : internalVisible;
+
+  const resolvedParcelId = (() => {
+    if (parcelIdProp) return parcelIdProp;
+    if (selectedEntityId?.includes('AgriParcel')) return selectedEntityId;
+    return undefined;
+  })();
 
   const loadBuildings = useCallback(async () => {
     // A destroyed viewer is still truthy; touching .dataSources/.camera then
@@ -46,26 +53,22 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) =
     dsRef.current = ds;
 
     try {
-      const params = new URLSearchParams();
-      if (parcelId) {
-        params.set('parcel_id', parcelId);
+      let geojson: { type: string; features: unknown[] };
+
+      if (resolvedParcelId) {
+        geojson = await getCadastralApi().getParcelBuildings(resolvedParcelId);
       } else {
         const rect = viewer.camera.computeViewRectangle();
-        if (rect) {
-          const west = Cesium.Math.toDegrees(rect.west);
-          const south = Cesium.Math.toDegrees(rect.south);
-          const east = Cesium.Math.toDegrees(rect.east);
-          const north = Cesium.Math.toDegrees(rect.north);
-          params.set('bbox', `${west},${south},${east},${north}`);
-        }
+        if (!rect) return;
+        const west = Cesium.Math.toDegrees(rect.west);
+        const south = Cesium.Math.toDegrees(rect.south);
+        const east = Cesium.Math.toDegrees(rect.east);
+        const north = Cesium.Math.toDegrees(rect.north);
+        geojson = await getCadastralApi().getBuildings({
+          bbox: `${west},${south},${east},${north}`,
+        });
       }
 
-      if (!params.has('bbox') && !params.has('parcel_id')) return;
-
-      const geojson = await getCadastralApi().getBuildings({
-        bbox: params.get('bbox') ?? undefined,
-        parcelId: params.get('parcel_id') ?? undefined,
-      });
       if (!geojson.features || geojson.features.length === 0) return;
       if (viewer.isDestroyed?.()) return;
 
@@ -96,12 +99,16 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) =
 
       viewer.dataSources.add(ds);
     } catch (err) {
-      console.error('[CadastralBuildingLayer] Failed to load buildings:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('HTTP 404')) {
+        console.warn('[CadastralBuildingLayer] Buildings unavailable:', message);
+      }
     }
-  }, [viewer, isVisible, isViewerReady, parcelId]);
+  }, [viewer, isVisible, isViewerReady, resolvedParcelId]);
 
   useEffect(() => {
     if (!viewer || viewer.isDestroyed?.() || !isViewerReady) return;
+    if (resolvedParcelId) return;
 
     const onCameraMoveEnd = () => {
       if (isVisible) loadBuildings();
@@ -112,7 +119,7 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) =
         viewer.camera.moveEnd.removeEventListener(onCameraMoveEnd);
       }
     };
-  }, [viewer, isViewerReady, isVisible, loadBuildings]);
+  }, [viewer, isViewerReady, isVisible, loadBuildings, resolvedParcelId]);
 
   useEffect(() => {
     if (!isVisible) {

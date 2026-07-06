@@ -73,10 +73,24 @@ class CadastralApiService {
     type: string;
     features: unknown[];
   }> {
+    if (params.parcelId) {
+      return this.getParcelBuildings(params.parcelId);
+    }
     const qs = new URLSearchParams();
     if (params.bbox) qs.set('bbox', params.bbox);
-    if (params.parcelId) qs.set('parcel_id', params.parcelId);
     return this.client.get(`/buildings?${qs.toString()}`, {
+      headers: { Accept: 'application/json' },
+    });
+  }
+
+  async getParcelBuildings(parcelId: string): Promise<{
+    type: string;
+    features: unknown[];
+  }> {
+    const id = parcelId.includes('AgriParcel:')
+      ? parcelId.split(':').pop()!
+      : parcelId;
+    return this.client.get(`/parcels/${encodeURIComponent(id)}/buildings`, {
       headers: { Accept: 'application/json' },
     });
   }

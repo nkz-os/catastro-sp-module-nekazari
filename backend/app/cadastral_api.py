@@ -64,7 +64,7 @@ except ImportError:
 
 # Import cadastral clients and region router
 try:
-    from region_router import get_region
+    from region_router import get_region, get_region_for_bbox
     from catastro_clients import (
         SpanishStateCatastroClient,
         NavarraCatastroClient,
@@ -73,6 +73,7 @@ try:
 except ImportError:
     logger.error("Failed to import region_router or catastro_clients")
     def get_region(lat, lon): return 'spain'  # Fallback
+    def get_region_for_bbox(bbox): return 'spain'
     SpanishStateCatastroClient = None
     NavarraCatastroClient = None
     EuskadiCatastroClient = None
@@ -1132,7 +1133,7 @@ def _get_buildings_for_bbox(bbox):
     """
     centre_lat = (bbox[1] + bbox[3]) / 2.0
     centre_lon = (bbox[0] + bbox[2]) / 2.0
-    region = get_region(centre_lat, centre_lon)
+    region = get_region_for_bbox(bbox)
 
     if region == 'spain':
         client = _get_spanish_client()
@@ -1145,11 +1146,12 @@ def _get_buildings_for_bbox(bbox):
             return {'error': 'Navarra Catastro client not available'}, 503
         buildings = client.query_buildings(bbox)
     elif region == 'euskadi':
-        return {
-            'error': 'Not implemented',
-            'region': 'euskadi',
-            'message': 'Euskadi building layer not yet available'
-        }, 501
+        client = EuskadiCatastroClient() if EuskadiCatastroClient else None
+        if not client:
+            return {'error': 'Euskadi Catastro client not available'}, 503
+        buildings = client.query_buildings(bbox)
+        if not buildings:
+            return {'type': 'FeatureCollection', 'features': []}, 200
     else:
         return {'error': f'Unknown region: {region}'}, 500
 
@@ -1201,8 +1203,13 @@ def get_buildings():
         GeoJSON FeatureCollection with 'height' property.
     """
     bbox_str = request.args.get('bbox')
+    parcel_id = request.args.get('parcel_id')
+
+    if parcel_id and not bbox_str:
+        return get_parcel_buildings(parcel_id)
+
     if not bbox_str:
-        return jsonify({'error': 'bbox parameter required (west,south,east,north)'}), 400
+        return jsonify({'error': 'bbox or parcel_id parameter required'}), 400
 
     try:
         parts = [float(x) for x in bbox_str.split(',')]

@@ -67,6 +67,67 @@ def _select_best_feature(features: List[Dict[str, Any]], longitude: float, latit
     return min(features, key=lambda f: _feature_distance_rank(f, longitude, latitude))
 
 
+WFS_CRS_URN = "urn:ogc:def:crs:EPSG::4326"
+DEFAULT_BUILDING_HEIGHT_M = 6.0
+
+
+def _wfs_bbox_variants(bbox: Tuple[float, float, float, float]) -> List[str]:
+    """WFS 2.0 EPSG:4326 often expects lat,lon axis order — try both."""
+    minx, miny, maxx, maxy = bbox
+    return [
+        f"{minx},{miny},{maxx},{maxy},{WFS_CRS_URN}",
+        f"{miny},{minx},{maxy},{maxx},{WFS_CRS_URN}",
+    ]
+
+
+def _apply_building_heights(features: List[Dict[str, Any]], default_height: float = DEFAULT_BUILDING_HEIGHT_M) -> List[Dict[str, Any]]:
+    """Ensure each feature has a numeric properties.height."""
+    out = []
+    for feature in features:
+        props = dict(feature.get('properties') or {})
+        height = props.get('height')
+        if height is None:
+            height = NavarraCatastroClient._height_from_attributes(props)
+        if height is None:
+            for key in ('numberOfFloorsAboveGround', 'numberoffloorsaboveground', 'floors', 'plantas', 'PLANTAS'):
+                val = props.get(key)
+                if val is not None:
+                    try:
+                        floors = int(float(str(val)))
+                        if floors > 0:
+                            height = floors * 3.0
+                            break
+                    except (ValueError, TypeError):
+                        continue
+        if height is None:
+            height = default_height
+        props['height'] = float(height)
+        feat = {
+            'type': 'Feature',
+            'geometry': feature.get('geometry'),
+            'properties': props,
+        }
+        if feature.get('id') is not None:
+            feat['id'] = feature['id']
+        out.append(feat)
+    return out
+
+
+def _merge_feature_collections(collections: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge multiple GeoJSON FeatureCollections, deduplicating by feature id."""
+    seen = set()
+    merged: List[Dict[str, Any]] = []
+    for collection in collections:
+        for feature in collection.get('features') or []:
+            fid = feature.get('id')
+            if fid:
+                if fid in seen:
+                    continue
+                seen.add(fid)
+            merged.append(feature)
+    return {'type': 'FeatureCollection', 'features': merged}
+
+
 class WFSCapabilitiesDiscovery:
     """
     Utility class for discovering WFS capabilities and available feature types.
@@ -1752,30 +1813,23 @@ class SpanishStateCatastroClient:
 
             wfs_url = "http://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx"
 
-            srs_code = str(srs)
-            if srs_code.upper().startswith("EPSG"):
-                srs_code = srs_code.split(":")[-1]
-            srs_name = f"EPSG::{srs_code}"
+            for bbox_str in _wfs_bbox_variants(bbox):
+                params = {
+                    'service': 'WFS',
+                    'version': '2.0.0',
+                    'request': 'GetFeature',
+                    'typeNames': 'BU:BuildingPart',
+                    'srsName': WFS_CRS_URN,
+                    'bbox': bbox_str,
+                    'outputFormat': 'application/json',
+                }
 
-            # Build bbox string (minx,miny,maxx,maxy)
-            bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]},{srs_name}"
+                logger.info(f"Requesting buildings from WFS BU: bbox={bbox_str}")
+                response = requests.get(wfs_url, params=params, timeout=20)
 
-            # Try JSON output first
-            params = {
-                'service': 'WFS',
-                'version': '2.0.0',
-                'request': 'GetFeature',
-                'typeNames': 'BU:BuildingPart',
-                'srsName': srs_name,
-                'bbox': bbox_str,
-                'outputFormat': 'application/json',
-            }
+                if response.status_code != 200:
+                    continue
 
-            logger.info(f"Requesting buildings from WFS BU: bbox={bbox_str}")
-            response = requests.get(wfs_url, params=params, timeout=15)
-
-            if response.status_code == 200:
-                # Check if response is JSON
                 content_type = response.headers.get('Content-Type', '')
                 if 'json' in content_type.lower() or response.text.strip().startswith('{'):
                     try:
@@ -1784,29 +1838,16 @@ class SpanishStateCatastroClient:
                             logger.info(f"Found {len(data['features'])} buildings in JSON response")
                             return self._parse_building_json(data)
                     except (ValueError, json.JSONDecodeError):
-                        logger.warning("JSON parse failed for building WFS, falling back to GML")
+                        logger.debug("JSON parse failed for building WFS, trying GML")
 
-                # Fallback: try without outputFormat for GML/XML
-                logger.info("Building WFS did not return JSON, trying GML/XML fallback")
                 params_no_format = {k: v for k, v in params.items() if k != 'outputFormat'}
-                response = requests.get(wfs_url, params=params_no_format, timeout=15)
-
+                response = requests.get(wfs_url, params=params_no_format, timeout=20)
                 if response.status_code == 200:
                     result = self._parse_building_gml(response.content)
-                    if result:
+                    if result and result.get('features'):
                         return result
 
-                # Try WFS 1.1.0 as last fallback
-                params_110 = params_no_format.copy()
-                params_110['version'] = '1.1.0'
-                response = requests.get(wfs_url, params=params_110, timeout=15)
-
-                if response.status_code == 200:
-                    result = self._parse_building_gml(response.content)
-                    if result:
-                        return result
-
-            logger.warning(f"Building WFS returned status {response.status_code}")
+            logger.warning("Building WFS returned no features for any bbox variant")
             return None
 
         except requests.exceptions.RequestException as e:
@@ -2405,14 +2446,6 @@ class NavarraCatastroClient:
         """
         wfs_url = self.WFS_BASE_URL
 
-        srs_code = str(srs)
-        if srs_code.upper().startswith("EPSG"):
-            srs_code = srs_code.split(":")[-1]
-        srs_name = f"EPSG::{srs_code}"
-
-        bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]},{srs_name}"
-
-        # Layer ordering: try primary building layer first
         building_layers = [
             'IDENA:CATAST_Pol_Edificacion',
             'IDENA:DIRECC_Pol_Edifaltura',
@@ -2422,35 +2455,38 @@ class NavarraCatastroClient:
         used_layer = None
 
         for layer in building_layers:
-            params = {
-                'service': 'WFS',
-                'version': '2.0.0',
-                'request': 'GetFeature',
-                'typeNames': layer,
-                'srsName': srs_name,
-                'bbox': bbox_str,
-                'outputFormat': 'application/json',
-            }
+            for bbox_str in _wfs_bbox_variants(bbox):
+                params = {
+                    'service': 'WFS',
+                    'version': '2.0.0',
+                    'request': 'GetFeature',
+                    'typeNames': layer,
+                    'srsName': WFS_CRS_URN,
+                    'bbox': bbox_str,
+                    'outputFormat': 'application/json',
+                }
 
-            logger.info(f"Querying IDENA buildings with layer: {layer}, bbox={bbox_str}")
-            try:
-                response = self.session.get(wfs_url, params=params, timeout=15)
+                logger.info(f"Querying IDENA buildings with layer: {layer}, bbox={bbox_str}")
+                try:
+                    response = self.session.get(wfs_url, params=params, timeout=20)
 
-                if response.status_code == 200:
-                    content_type = response.headers.get('Content-Type', '')
-                    if 'json' in content_type.lower() or response.text.strip().startswith('{'):
-                        try:
-                            data = response.json()
-                            if data.get('features') and len(data['features']) > 0:
-                                result_data = data
-                                used_layer = layer
-                                logger.info(f"Found {len(data['features'])} buildings in layer {layer}")
-                                break
-                        except (ValueError, json.JSONDecodeError):
-                            logger.warning(f"JSON parse failed for {layer}")
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Request error for layer {layer}: {e}")
-                continue
+                    if response.status_code == 200:
+                        content_type = response.headers.get('Content-Type', '')
+                        if 'json' in content_type.lower() or response.text.strip().startswith('{'):
+                            try:
+                                data = response.json()
+                                if data.get('features') and len(data['features']) > 0:
+                                    result_data = data
+                                    used_layer = layer
+                                    logger.info(f"Found {len(data['features'])} buildings in layer {layer}")
+                                    break
+                            except (ValueError, json.JSONDecodeError):
+                                logger.warning(f"JSON parse failed for {layer}")
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"Request error for layer {layer}: {e}")
+                    continue
+            if result_data:
+                break
 
         if not result_data:
             logger.warning("No buildings found in any IDENA layer")
@@ -2471,7 +2507,7 @@ class NavarraCatastroClient:
                 feature.get('id', '')
             )
 
-            height = self._extract_building_height(geometry, props, refcat, bbox, srs_name)
+            height = self._extract_building_height(geometry, props, refcat, bbox, WFS_CRS_URN)
 
             new_props = dict(props)
             new_props['height'] = height
@@ -2993,6 +3029,78 @@ class EuskadiCatastroClient:
         except Exception as e:
             logger.error(f"Unexpected error querying Euskadi cadastre: {e}", exc_info=True)
             return None
+
+    BUILDING_WFS_SOURCES = (
+        ("https://geo.araba.eus/WFS_INSPIRE_BU", ("INSPIRE_BU:BU.Building",), True),
+        ("https://b5m.gipuzkoa.eus/inspire/wfs/gipuzkoa_wfs_bu", ("bu-ext2d:Building",), False),
+    )
+
+    def query_buildings(
+        self,
+        bbox: tuple,
+        srs: str = "4326",
+    ) -> Optional[Dict[str, Any]]:
+        """Query INSPIRE building layers from Araba and Gipuzkoa WFS (merge)."""
+        collections: List[Dict[str, Any]] = []
+        spanish_parser = SpanishStateCatastroClient()
+
+        for wfs_url, layers, json_ok in self.BUILDING_WFS_SOURCES:
+            for layer in layers:
+                found = False
+                for bbox_str in _wfs_bbox_variants(bbox):
+                    params = {
+                        'service': 'WFS',
+                        'version': '2.0.0',
+                        'request': 'GetFeature',
+                        'typeNames': layer,
+                        'bbox': bbox_str,
+                        'srsName': WFS_CRS_URN,
+                    }
+                    if json_ok:
+                        params['outputFormat'] = 'application/json'
+                    try:
+                        response = self.session.get(wfs_url, params=params, timeout=25)
+                    except requests.exceptions.RequestException as exc:
+                        logger.warning("Euskadi building WFS failed (%s): %s", layer, exc)
+                        continue
+                    if response.status_code != 200:
+                        continue
+
+                    parsed = None
+                    content_type = response.headers.get('Content-Type', '')
+                    if json_ok and (
+                        'json' in content_type.lower()
+                        or response.text.strip().startswith('{')
+                    ):
+                        try:
+                            data = response.json()
+                            if data.get('features'):
+                                parsed = spanish_parser._parse_building_json(data)
+                        except (ValueError, json.JSONDecodeError):
+                            parsed = None
+                    if not parsed:
+                        parsed = spanish_parser._parse_building_gml(response.content)
+                    if parsed and parsed.get('features'):
+                        collections.append(parsed)
+                        logger.info(
+                            "Euskadi buildings: %s features from %s",
+                            len(parsed['features']),
+                            layer,
+                        )
+                        found = True
+                        break
+                if found:
+                    break
+
+        if not collections:
+            logger.warning("No Euskadi building features found for bbox %s", bbox)
+            return None
+
+        merged = _merge_feature_collections(collections)
+        if not merged.get('features'):
+            return None
+        merged['features'] = _apply_building_heights(merged['features'])
+        return merged
 
     def _parse_wfs_xml_response(self, content: bytes) -> Optional[Dict[str, Any]]:
         """
