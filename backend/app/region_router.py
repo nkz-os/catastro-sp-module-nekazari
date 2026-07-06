@@ -8,7 +8,7 @@
 import logging
 import json
 import os
-from typing import Literal
+from typing import Literal, Tuple
 from shapely.geometry import Point, shape, Polygon
 from shapely.errors import GEOSException
 
@@ -142,6 +142,30 @@ class RegionRouter:
             logger.error(f"Error determining region for ({longitude}, {latitude}): {e}")
             # Default to Spain on error
             return 'spain'
+
+
+def get_region_for_bbox(bbox: Tuple[float, float, float, float]) -> RegionType:
+    """
+    Determine cadastral region for a bounding box.
+
+    Uses corners + centre so Navarra parcels are not misclassified as Euskadi
+    when the camera bbox centre falls outside Navarra.
+    """
+    minx, miny, maxx, maxy = bbox
+    router = get_region_router()
+    samples = (
+        (miny, minx),
+        (miny, maxx),
+        (maxy, minx),
+        (maxy, maxx),
+        ((miny + maxy) / 2.0, (minx + maxx) / 2.0),
+    )
+    regions = {router.get_region(lat, lon) for lat, lon in samples}
+    if 'navarra' in regions:
+        return 'navarra'
+    if 'euskadi' in regions:
+        return 'euskadi'
+    return 'spain'
 
 
 # Global instance (singleton pattern)
