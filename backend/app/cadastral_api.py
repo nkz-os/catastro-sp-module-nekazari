@@ -18,7 +18,7 @@ import requests
 from shapely.geometry import shape
 
 # Orion-LD client wrapper (nkz-platform-sdk SyncOrionClient)
-from app.orion_client import get_orion_client
+from app.orion_client import get_entity, get_orion_client
 
 # Add parent directories to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'common'))
@@ -1161,33 +1161,90 @@ def _get_buildings_for_bbox(bbox):
     return buildings, 200
 
 
+def _parcel_lookup_keys(parcel_id: str) -> tuple[list[str], list[str]]:
+    """Build Orion URNs and DB lookup keys from parcel id, URN, or cadastral ref."""
+    raw = (parcel_id or '').strip()
+    uuid_part = raw.split(':')[-1] if raw.startswith('urn:') else raw
+    orion_ids = [f'urn:ngsi-ld:AgriParcel:{uuid_part}']
+    if raw.startswith('urn:'):
+        orion_ids.insert(0, raw)
+    all_keys = list(dict.fromkeys([raw, uuid_part, *orion_ids]))
+    return orion_ids, all_keys
+
+
+def _geometry_from_entity(entity: dict) -> Optional[dict]:
+    """Extract GeoJSON geometry from an AgriParcel NGSI-LD entity."""
+    location = entity.get('location') or entity.get('https://uri.etsi.org/ngsi-ld/location')
+    if not isinstance(location, dict):
+        return None
+    geo_value = location.get('value') or location
+    if isinstance(geo_value, dict) and geo_value.get('type'):
+        return geo_value
+    return None
+
+
+def _get_parcel_geom_from_orion(tenant_id: str, orion_ids: list[str]) -> Optional[dict]:
+    """Fallback: read parcel geometry directly from Orion-LD."""
+    for urn in orion_ids:
+        entity = get_entity(tenant_id, urn, entity_type='AgriParcel')
+        if not entity:
+            continue
+        geometry = _geometry_from_entity(entity)
+        if geometry:
+            return geometry
+    return None
+
+
 def _get_parcel_geom(parcel_id):
     """
-    Get parcel geometry from PostGIS read-model.
+    Get parcel geometry from PostGIS read-model, with Orion-LD fallback.
 
     Args:
-        parcel_id: Parcel ID (UUID or cadastral reference)
+        parcel_id: AgriParcel UUID, full URN, cadastral reference, or read-model id
 
     Returns:
         GeoJSON geometry dict, or None if not found.
     """
+    orion_ids, lookup_keys = _parcel_lookup_keys(parcel_id)
+    tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None)
+
     try:
         conn = psycopg2.connect(POSTGRES_URL)
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
+
+        where_parts = [
+            "orion_entity_id = ANY(%s)",
+            "cadastral_reference = ANY(%s)",
+        ]
+        params: list[Any] = [lookup_keys, lookup_keys]
+
+        if str(parcel_id).isdigit():
+            where_parts.append("id::text = %s")
+            params.append(str(parcel_id))
+
+        sql = f"""
             SELECT ST_AsGeoJSON(geometry) as geometry
             FROM cadastral_parcels
-            WHERE id = %s OR cadastral_reference = %s
-        """, (parcel_id, parcel_id))
+            WHERE ({' OR '.join(where_parts)})
+        """
+        if tenant_id:
+            cur.execute("SELECT set_config('app.current_tenant', %s, false)", (tenant_id,))
+            sql += " AND tenant_id = %s"
+            params.append(tenant_id)
+
+        sql += " LIMIT 1"
+        cur.execute(sql, tuple(params))
         row = cur.fetchone()
         cur.close()
         conn.close()
         if row and row.get('geometry'):
             return json.loads(row['geometry'])
-        return None
     except Exception as e:
         logger.error(f"Error getting parcel geometry for {parcel_id}: {e}")
-        return None
+
+    if tenant_id:
+        return _get_parcel_geom_from_orion(tenant_id, orion_ids)
+    return None
 
 
 @api_bp.route('/buildings', methods=['GET'])
