@@ -7,6 +7,8 @@ interface Props {
   parcelId?: string;
 }
 
+const DEFAULT_BUILDING_HEIGHT_M = 5;
+
 export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) => {
   const viewerCtx = useViewerOptional();
   const viewer = viewerCtx?.cesiumViewer ?? null;
@@ -67,25 +69,29 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId }) =
       if (!geojson.features || geojson.features.length === 0) return;
       if (viewer.isDestroyed?.()) return;
 
-      await ds.load(geojson, { clampToGround: true });
+      await ds.load(geojson, { clampToGround: false });
       if (viewer.isDestroyed?.()) return;
 
-      // Apply extrudedHeight styling to each entity
+      // Apply extrudedHeight styling to each polygon entity
       const entities = ds.entities.values;
       for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
+        if (!entity.polygon) continue;
         const props = entity.properties;
-        if (!props) continue;
-        const height = props.height?.getValue?.(Cesium.JulianDate.now());
-        if (height && height > 0) {
-          entity.polygon = new Cesium.PolygonGraphics({
-            extrudedHeight: height,
-            material: Cesium.Color.fromCssColorString('#94a3b8').withAlpha(0.65),
-            outline: true,
-            outlineColor: Cesium.Color.fromCssColorString('#475569'),
-            outlineWidth: 1,
-          });
-        }
+        const now = Cesium.JulianDate.now();
+        const rawHeight = props?.height?.getValue?.(now);
+        const extrudedHeight =
+          typeof rawHeight === 'number' && rawHeight > 0 ? rawHeight : DEFAULT_BUILDING_HEIGHT_M;
+        entity.polygon = new Cesium.PolygonGraphics({
+          hierarchy: entity.polygon.hierarchy,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          extrudedHeight,
+          extrudedHeightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+          material: Cesium.Color.fromCssColorString('#94a3b8').withAlpha(0.65),
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString('#475569'),
+          outlineWidth: 1,
+        });
       }
 
       viewer.dataSources.add(ds);
