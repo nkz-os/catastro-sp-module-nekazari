@@ -7,6 +7,7 @@
 import os
 import sys
 import logging
+import hmac
 from flask import Flask, request, jsonify, g, Blueprint
 from flask_cors import CORS
 from typing import Dict, Any, List, Optional
@@ -87,6 +88,18 @@ except ImportError:
     logger.warning("Cache service not available, caching disabled")
     _cache = None
 
+def _notify_unauthorized() -> bool:
+    """Flag-gated auth for the Orion notification receiver (two-phase rollout)."""
+    require = os.getenv("NOTIFY_REQUIRE_INTERNAL_SECRET", "").lower() in (
+        "1", "true", "yes", "on"
+    )
+    if not require:
+        return False
+    secret = os.getenv("INTERNAL_SERVICE_SECRET", "")
+    provided = request.headers.get("X-Internal-Service-Secret", "")
+    return not (secret and hmac.compare_digest(provided, secret))
+
+
 @api_bp.route('/orion/notify', methods=['POST'])
 def orion_notification():
     """Receive NGSI-LD subscription notifications about AgriParcel changes.
@@ -94,6 +107,9 @@ def orion_notification():
     Called by Orion-LD when an AgriParcel is created/updated/deleted
     via the entity-manager. Maintains the local read-model in PostGIS.
     """
+    if _notify_unauthorized():
+        return jsonify({'error': 'Unauthorized'}), 401
+
     data = request.json
     if not data or 'data' not in data:
         return jsonify({'error': 'Invalid notification'}), 400
