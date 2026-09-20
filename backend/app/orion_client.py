@@ -41,8 +41,8 @@ def get_orion_client(tenant_id: str) -> SyncOrionClient:
     """
     if tenant_id not in _clients:
         _clients[tenant_id] = SyncOrionClient(
-            orion_url=ORION_URL,
             tenant_id=tenant_id,
+            base_url=ORION_URL,
             context_url=CONTEXT_URL,
         )
     return _clients[tenant_id]
@@ -69,7 +69,7 @@ def upsert_agriparcel(
     """
     try:
         client = get_orion_client(tenant_id)
-        client.patch_attributes(
+        client.update_entity_attrs(
             f'urn:ngsi-ld:AgriParcel:{parcel_id}',
             attrs,
         )
@@ -94,7 +94,7 @@ def get_entity(
     """
     try:
         client = get_orion_client(tenant_id)
-        return client.get_entity(entity_id, entity_type=entity_type)
+        return client.get_entity(entity_id)
     except Exception as exc:
         logger.error(
             'Failed to get entity %s: %s',
@@ -116,7 +116,7 @@ def query_entities(
     """
     try:
         client = get_orion_client(tenant_id)
-        return client.query(entity_type, attrs=attrs, **params)
+        return client.query_entities(type=entity_type, attrs=attrs, **params)
     except Exception as exc:
         logger.error(
             'Failed to query entities type=%s: %s',
