@@ -22,6 +22,55 @@ except Exception:
     Point = None
     shape = None
 
+# Simplification tolerance (meters) applied to raw cadastral polygons.
+# The Catastro WFS/INSPIRE service returns parcel boundaries with hundreds
+# of vertices (sub-metre detail) that downstream geo-queries can't handle.
+CADASTRAL_GEOMETRY_SIMPLIFY_TOLERANCE_M = 1.0
+
+
+def _simplify_geometry(geometry: Dict[str, Any]) -> Dict[str, Any]:
+    """Simplify a GeoJSON Polygon (Douglas-Peucker) to drop redundant vertices.
+
+    Raw cadastral polygons can carry hundreds of vertices (e.g. 486 for a
+    217 ha parcel), which makes Orion-LD geo-queries in downstream modules
+    extremely slow. The source geometry is in WGS84 degrees, so it is first
+    reprojected to a local UTM zone (meters), simplified to a 1 m tolerance,
+    then reprojected back to WGS84.
+
+    Returns the original geometry untouched if shapely/pyproj are unavailable
+    or the simplification fails — this must never break parcel creation.
+    """
+    if shape is None or not isinstance(geometry, dict):
+        return geometry
+    if geometry.get("type") != "Polygon":
+        return geometry
+    try:
+        from shapely.ops import transform as shapely_transform
+        from pyproj import Transformer
+
+        geom = shape(geometry)
+        lon, lat = geom.centroid.x, geom.centroid.y
+        zone = int((lon + 180.0) // 6.0) + 1
+        epsg = 32600 + zone if lat >= 0 else 32700 + zone
+        to_utm = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+        to_wgs = Transformer.from_crs(f"EPSG:{epsg}", "EPSG:4326", always_xy=True)
+
+        geom_utm = shapely_transform(to_utm.transform, geom)
+        simplified_utm = geom_utm.simplify(
+            CADASTRAL_GEOMETRY_SIMPLIFY_TOLERANCE_M, preserve_topology=True
+        )
+        simplified = shapely_transform(to_wgs.transform, simplified_utm)
+
+        if simplified.is_empty:
+            return geometry
+        result = simplified.__geo_interface__
+        if result.get("type") != "Polygon":
+            return geometry
+        return result
+    except Exception as exc:  # noqa: BLE001 — must never break parcel creation
+        logger.warning("Geometry simplification failed, returning original: %s", exc)
+        return geometry
+
 # Try to import cache service for capabilities caching
 try:
     from cache_service import get_cache
@@ -342,11 +391,11 @@ class SpanishStateCatastroClient:
         # Try WFS INSPIRE service first (provides full polygon geometry)
         geometry = self._get_geometry_from_wfs(cadastral_reference, srs)
         if geometry:
-            return geometry
+            return _simplify_geometry(geometry)
         
         # Fallback: Use Consulta_CPMRC for centroid (creates buffer polygon)
         logger.info(f"WFS failed, trying Consulta_CPMRC for {cadastral_reference}")
-        return self._get_geometry_from_soap(cadastral_reference, srs)
+        return _simplify_geometry(self._get_geometry_from_soap(cadastral_reference, srs))
     
     def _get_geometry_from_wfs(
         self,
