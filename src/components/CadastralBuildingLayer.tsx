@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { useViewerOptional } from '@nekazari/sdk';
 import { getCadastralApi } from '../services/cadastralApi';
+import { useBuildingsLayerVisible } from '../services/buildingsLayerStore';
 
 interface Props {
   visible?: boolean;
@@ -15,16 +16,7 @@ export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId: par
   const isViewerReady = viewerCtx?.isViewerReady !== false;
   const selectedEntityId = viewerCtx?.selectedEntityId ?? null;
   const dsRef = useRef<any>(null);
-  const [internalVisible, setInternalVisible] = useState(false);
-
-  // Listen for toggle events from CadastralBuildingsToggle
-  useEffect(() => {
-    const handler = (e: CustomEvent) => {
-      setInternalVisible(e.detail.visible);
-    };
-    window.addEventListener('cadastral:buildings-toggle', handler as EventListener);
-    return () => window.removeEventListener('cadastral:buildings-toggle', handler as EventListener);
-  }, []);
+  const [internalVisible] = useBuildingsLayerVisible();
 
   const isVisible = visible !== undefined ? visible : internalVisible;
 

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useTranslation } from '@nekazari/sdk';
 import { SlotShellCompact } from '@nekazari/viewer-kit';
 import { Building2 } from 'lucide-react';
+import { useBuildingsLayerVisible } from '../services/buildingsLayerStore';
 
 const cadastralAccent = { base: '#A855F7', soft: '#F3E8FF', strong: '#7E22CE' };
 
@@ -11,13 +12,7 @@ const cadastralAccent = { base: '#A855F7', soft: '#F3E8FF', strong: '#7E22CE' };
  */
 export const CadastralBuildingsToggle: React.FC = () => {
   const { t } = useTranslation('cadastral');
-  const [enabled, setEnabled] = useState(false);
-
-  useEffect(() => {
-    window.dispatchEvent(new CustomEvent('cadastral:buildings-toggle', {
-      detail: { visible: enabled },
-    }));
-  }, [enabled]);
+  const [enabled, setEnabled] = useBuildingsLayerVisible();
 
   return (
     <SlotShellCompact moduleId="catastro-spain" accent={cadastralAccent}>
