@@ -1395,7 +1395,7 @@ def get_buildings():
     try:
         return jsonify(_buildings_for_tenant_view(tenant_id, bbox)), 200
     except Exception as exc:
-        logger.error("Could not list tenant parcels for buildings: %s", exc, exc_info=True)
+        logger.exception("Could not list tenant parcels for buildings: %s", exc)
         return jsonify({'error': 'Could not load tenant parcels'}), 503
 
 
