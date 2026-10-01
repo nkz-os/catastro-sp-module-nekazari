@@ -33,6 +33,7 @@ class CadastralCache:
     TTL_COORDINATES = 86400      # 24 hours
     TTL_CAPABILITIES = 604800    # 7 days
     TTL_GEOMETRY = 604800        # 7 days
+    TTL_PARCEL_BUILDINGS = 604800  # 7 days (key carries the parcel geometry hash)
     
     # Key prefixes
     PREFIX = "cadastral"
@@ -270,6 +271,32 @@ class CadastralCache:
             logger.warning(f"Cache write error for geometry: {e}")
             return False
     
+    def get_parcel_buildings(self, key: str) -> Optional[List[Dict[str, Any]]]:
+        """Cached building features for one parcel, or None when not cached."""
+        if not self._available:
+            return None
+        try:
+            data = self._redis.get(f"{self.PREFIX}:parcel_buildings:{key}")
+            return json.loads(data) if data else None
+        except Exception as e:
+            logger.warning(f"Cache read error for parcel buildings: {e}")
+            return None
+
+    def set_parcel_buildings(self, key: str, features: List[Dict[str, Any]]) -> bool:
+        """Cache building features for one parcel (empty lists included)."""
+        if not self._available:
+            return False
+        try:
+            self._redis.setex(
+                f"{self.PREFIX}:parcel_buildings:{key}",
+                self.TTL_PARCEL_BUILDINGS,
+                json.dumps(features),
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"Cache write error for parcel buildings: {e}")
+            return False
+
     def invalidate_by_coordinates(self, lat: float, lon: float) -> bool:
         """
         Invalidate cached data for specific coordinates.
