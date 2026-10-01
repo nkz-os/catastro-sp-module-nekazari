@@ -1,53 +1,22 @@
-"""
-Tests for MODULE_DISPLAY_NAME Backend
-"""
+"""Smoke tests for the cadastral Flask app."""
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app.main import app
+from app.cadastral_api import app
 
 
 @pytest.fixture
 def client():
-    """Test client fixture."""
-    return TestClient(app)
+    app.config["TESTING"] = True
+    return app.test_client()
 
 
-class TestHealth:
-    """Health endpoint tests."""
-    
-    def test_health_check(self, client):
-        """Test health endpoint returns healthy status."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert data["status"] == "healthy"
-        assert "service" in data
-        assert "version" in data
+def test_health(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "healthy", "service": "cadastral-api"}
 
 
-class TestAPI:
-    """API endpoint tests."""
-    
-    def test_docs_available(self, client):
-        """Test OpenAPI docs are available."""
-        response = client.get("/api/MODULE_NAME/docs")
-        # Should return HTML or redirect
-        assert response.status_code in [200, 307]
-    
-    def test_openapi_schema(self, client):
-        """Test OpenAPI schema is generated."""
-        response = client.get("/api/MODULE_NAME/openapi.json")
-        assert response.status_code == 200
-        
-        schema = response.json()
-        assert "openapi" in schema
-        assert "paths" in schema
-    
-    def test_list_data_requires_auth(self, client):
-        """Test that list endpoint requires authentication."""
-        response = client.get("/api/MODULE_NAME/data")
-        # Should return 403 (no auth) or require token
-        assert response.status_code in [401, 403]
+def test_buildings_requires_auth(client):
+    response = client.get("/api/cadastral-api/buildings?bbox=0,0,1,1")
+    assert response.status_code == 401
