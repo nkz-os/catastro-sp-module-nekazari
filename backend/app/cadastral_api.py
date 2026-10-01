@@ -16,7 +16,8 @@ from psycopg2.extras import RealDictCursor, Json
 import json
 from datetime import datetime
 import requests
-from shapely.geometry import shape
+import hashlib
+from shapely.geometry import box, shape
 
 # Orion-LD client wrapper (nkz-platform-sdk SyncOrionClient)
 from app.orion_client import get_entity, get_orion_client
@@ -1263,17 +1264,113 @@ def _get_parcel_geom(parcel_id):
     return None
 
 
+# Page size for listing a tenant's AgriParcels from Orion-LD.
+_ORION_PAGE = 100
+
+
+def _tenant_parcels_in_bbox(tenant_id: str, bbox: tuple) -> list:
+    """Return (entity_id, shapely geometry) for the tenant's parcels in `bbox`.
+
+    The SDK query has no geo filter, so every AgriParcel's location is read and
+    filtered here; a tenant has few parcels. Broker errors propagate.
+    """
+    view = box(*bbox)
+    client = get_orion_client(tenant_id)
+    parcels = []
+    offset = 0
+    while True:
+        page = client.query_entities(
+            type='AgriParcel', attrs='location', limit=_ORION_PAGE, offset=offset,
+        )
+        for entity in page:
+            geometry = _geometry_from_entity(entity)
+            if not geometry:
+                continue
+            try:
+                parcel_shape = shape(geometry)
+            except Exception:
+                logger.warning("Skipping parcel %s with invalid geometry", entity.get('id'))
+                continue
+            if parcel_shape.intersects(view):
+                parcels.append((entity['id'], parcel_shape))
+        if len(page) < _ORION_PAGE:
+            break
+        offset += _ORION_PAGE
+    return parcels
+
+
+def _parcel_buildings_cache_key(tenant_id: str, parcel_id: str, parcel_shape) -> str:
+    """Cache key bound to the parcel geometry, so editing the parcel invalidates it."""
+    digest = hashlib.sha256(parcel_shape.wkb).hexdigest()[:16]
+    return f"{tenant_id}:{parcel_id}:{digest}"
+
+
+def _buildings_in_parcel(tenant_id: str, parcel_id: str, parcel_shape) -> list:
+    """Buildings intersecting one parcel, cached per parcel geometry.
+
+    Raises RuntimeError when the regional building service fails.
+    """
+    key = _parcel_buildings_cache_key(tenant_id, parcel_id, parcel_shape)
+    if _cache and _cache.is_available:
+        cached = _cache.get_parcel_buildings(key)
+        if cached is not None:
+            return cached
+
+    data, status = _get_buildings_for_bbox(parcel_shape.bounds)
+    if status != 200:
+        raise RuntimeError(f"building service returned {status}: {data}")
+
+    features = []
+    for feat in (data or {}).get('features', []):
+        try:
+            if parcel_shape.intersects(shape(feat.get('geometry', {}))):
+                features.append(feat)
+        except Exception:
+            continue
+
+    if _cache and _cache.is_available:
+        _cache.set_parcel_buildings(key, features)
+    return features
+
+
+def _buildings_for_tenant_view(tenant_id: str, bbox: tuple) -> dict:
+    """Buildings inside the tenant's parcels that fall in the viewport `bbox`.
+
+    One building-service query per visible parcel instead of one for the whole
+    viewport: the map shows the tenant's own buildings only, and the regional
+    services' feature cap stops mattering. A failing parcel is logged and
+    skipped; buildings shared by adjacent parcels are returned once.
+    """
+    features = []
+    seen = set()
+    for parcel_id, parcel_shape in _tenant_parcels_in_bbox(tenant_id, bbox):
+        try:
+            parcel_features = _buildings_in_parcel(tenant_id, parcel_id, parcel_shape)
+        except Exception as exc:
+            logger.warning("Buildings for parcel %s failed: %s", parcel_id, exc)
+            continue
+        for feat in parcel_features:
+            fid = feat.get('id')
+            dedupe_key = fid if fid is not None else json.dumps(feat.get('geometry'), sort_keys=True)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            features.append(feat)
+    return {'type': 'FeatureCollection', 'features': features}
+
+
 @api_bp.route('/buildings', methods=['GET'])
 @require_auth
 def get_buildings():
     """
-    Get 3D building footprints within a bounding box.
+    Get 3D building footprints inside the tenant's parcels within a bounding box.
 
     Query params:
         bbox: west,south,east,north (WGS84, required)
 
     Returns:
-        GeoJSON FeatureCollection with 'height' property.
+        GeoJSON FeatureCollection with 'height' property, limited to buildings
+        that intersect one of the tenant's parcels in the viewport.
     """
     bbox_str = request.args.get('bbox')
     parcel_id = request.args.get('parcel_id')
@@ -1292,8 +1389,14 @@ def get_buildings():
     except (ValueError, TypeError):
         return jsonify({'error': 'Invalid bbox format. Use: west,south,east,north'}), 400
 
-    data, status = _get_buildings_for_bbox(bbox)
-    return jsonify(data), status
+    tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None)
+    if not tenant_id:
+        return jsonify({'error': 'Tenant context required'}), 401
+    try:
+        return jsonify(_buildings_for_tenant_view(tenant_id, bbox)), 200
+    except Exception as exc:
+        logger.exception("Could not list tenant parcels for buildings: %s", exc)
+        return jsonify({'error': 'Could not load tenant parcels'}), 503
 
 
 @api_bp.route('/parcels/<parcel_id>/buildings', methods=['GET'])
@@ -1316,30 +1419,15 @@ def get_parcel_buildings(parcel_id):
     if not parcel_geom:
         return jsonify({'error': 'Parcel not found'}), 404
 
-    # Get bbox of parcel
     parcel_shape = shape(parcel_geom)
-    bbox = parcel_shape.bounds  # (minx, miny, maxx, maxy)
+    tenant_id = getattr(g, 'tenant_id', None) or getattr(g, 'tenant', None) or ''
+    try:
+        features = _buildings_in_parcel(tenant_id, parcel_id, parcel_shape)
+    except RuntimeError as exc:
+        logger.warning("Buildings for parcel %s failed: %s", parcel_id, exc)
+        return jsonify({'error': 'Building service unavailable'}), 503
 
-    # Get buildings in that bbox
-    data, status = _get_buildings_for_bbox(bbox)
-
-    if status != 200:
-        return jsonify(data), status
-
-    if not isinstance(data, dict) or 'features' not in data:
-        return jsonify({'type': 'FeatureCollection', 'features': []}), 200
-
-    # Spatial filter: keep only buildings that intersect with parcel
-    filtered = []
-    for feat in data.get('features', []):
-        try:
-            feat_shape = shape(feat.get('geometry', {}))
-            if feat_shape and parcel_shape.intersects(feat_shape):
-                filtered.append(feat)
-        except Exception:
-            continue
-
-    return jsonify({'type': 'FeatureCollection', 'features': filtered}), 200
+    return jsonify({'type': 'FeatureCollection', 'features': features}), 200
 
 
 # Register blueprint (must be at module level — gunicorn never sees __main__)
