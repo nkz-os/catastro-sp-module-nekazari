@@ -1,0 +1,76 @@
+# =============================================================================
+# Catastro Spain Frontend Deployment (template)
+# =============================================================================
+# Production image pins: gitops-config/overlays/modules/catastro-sp/
+# Live UI is MF2 via MinIO OIDC publish. Legacy nginx kept for local dev only.
+# =============================================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catastro-spain-frontend
+  namespace: nekazari
+  labels:
+    app: catastro-spain-frontend
+    component: frontend
+    module: catastro-spain
+    nkz-os.org/profile: addon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catastro-spain-frontend
+  template:
+    metadata:
+      labels:
+        app: catastro-spain-frontend
+        component: frontend
+        module: catastro-spain
+    spec:
+      containers:
+        - name: nginx
+          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-frontend-auto:REPLACE_WITH_GIT_SHA
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 80
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catastro-spain-frontend-service
+  namespace: nekazari
+  labels:
+    app: catastro-spain-frontend
+    component: frontend
+    module: catastro-spain
+spec:
+  type: ClusterIP
+  selector:
+    app: catastro-spain-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP

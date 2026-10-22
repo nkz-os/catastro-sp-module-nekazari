@@ -1,0 +1,141 @@
+import React, { useCallback, useEffect, useRef } from 'react';
+import { useViewerOptional } from '@nekazari/sdk';
+import { getCadastralApi } from '../services/cadastralApi';
+import { useBuildingsLayerVisible } from '../services/buildingsLayerStore';
+
+interface Props {
+  visible?: boolean;
+  parcelId?: string;
+}
+
+const DEFAULT_BUILDING_HEIGHT_M = 5;
+
+export const CadastralBuildingLayer: React.FC<Props> = ({ visible, parcelId: parcelIdProp }) => {
+  const viewerCtx = useViewerOptional();
+  const viewer = viewerCtx?.cesiumViewer ?? null;
+  const isViewerReady = viewerCtx?.isViewerReady !== false;
+  const selectedEntityId = viewerCtx?.selectedEntityId ?? null;
+  const dsRef = useRef<any>(null);
+  const [internalVisible] = useBuildingsLayerVisible();
+
+  const isVisible = visible !== undefined ? visible : internalVisible;
+
+  const resolvedParcelId = (() => {
+    if (parcelIdProp) return parcelIdProp;
+    if (selectedEntityId?.includes('AgriParcel')) return selectedEntityId;
+    return undefined;
+  })();
+
+  const loadBuildings = useCallback(async () => {
+    // A destroyed viewer is still truthy; touching .dataSources/.camera then
+    // throws "_cesiumWidget is undefined". Guard on isDestroyed().
+    if (!viewer || viewer.isDestroyed?.() || !isViewerReady || !isVisible) return;
+    const Cesium = (window as any).Cesium;
+    if (!Cesium) return;
+
+    // Clean up previous data source
+    if (dsRef.current && !viewer.isDestroyed?.()) {
+      try {
+        viewer.dataSources.remove(dsRef.current);
+      } catch { /* viewer torn down mid-flight */ }
+      dsRef.current = null;
+    }
+
+    const ds = new Cesium.GeoJsonDataSource('catastro-buildings-3d');
+    dsRef.current = ds;
+
+    try {
+      let geojson: { type: string; features: unknown[] };
+
+      if (resolvedParcelId) {
+        geojson = await getCadastralApi().getParcelBuildings(resolvedParcelId);
+      } else {
+        const rect = viewer.camera.computeViewRectangle();
+        if (!rect) return;
+        const west = Cesium.Math.toDegrees(rect.west);
+        const south = Cesium.Math.toDegrees(rect.south);
+        const east = Cesium.Math.toDegrees(rect.east);
+        const north = Cesium.Math.toDegrees(rect.north);
+        geojson = await getCadastralApi().getBuildings({
+          bbox: `${west},${south},${east},${north}`,
+        });
+      }
+
+      if (!geojson.features || geojson.features.length === 0) return;
+      if (viewer.isDestroyed?.()) return;
+
+      await ds.load(geojson, { clampToGround: false });
+      if (viewer.isDestroyed?.()) return;
+
+      // Apply extrudedHeight styling to each polygon entity
+      const entities = ds.entities.values;
+      for (let i = 0; i < entities.length; i++) {
+        const entity = entities[i];
+        if (!entity.polygon) continue;
+        const props = entity.properties;
+        const now = Cesium.JulianDate.now();
+        const rawHeight = props?.height?.getValue?.(now);
+        const extrudedHeight =
+          typeof rawHeight === 'number' && rawHeight > 0 ? rawHeight : DEFAULT_BUILDING_HEIGHT_M;
+        entity.polygon = new Cesium.PolygonGraphics({
+          hierarchy: entity.polygon.hierarchy,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          extrudedHeight,
+          extrudedHeightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+          material: Cesium.Color.fromCssColorString('#94a3b8').withAlpha(0.65),
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString('#475569'),
+          outlineWidth: 1,
+        });
+      }
+
+      viewer.dataSources.add(ds);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('HTTP 404')) {
+        console.warn('[CadastralBuildingLayer] Buildings unavailable:', message);
+      }
+    }
+  }, [viewer, isVisible, isViewerReady, resolvedParcelId]);
+
+  useEffect(() => {
+    if (!viewer || viewer.isDestroyed?.() || !isViewerReady) return;
+    if (resolvedParcelId) return;
+
+    const onCameraMoveEnd = () => {
+      if (isVisible) loadBuildings();
+    };
+    viewer.camera.moveEnd.addEventListener(onCameraMoveEnd);
+    return () => {
+      if (!viewer.isDestroyed?.()) {
+        viewer.camera.moveEnd.removeEventListener(onCameraMoveEnd);
+      }
+    };
+  }, [viewer, isViewerReady, isVisible, loadBuildings, resolvedParcelId]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      if (dsRef.current && viewer && !viewer.isDestroyed?.()) {
+        try {
+          viewer.dataSources.remove(dsRef.current);
+        } catch { /* viewer torn down */ }
+        dsRef.current = null;
+      }
+      return;
+    }
+
+    loadBuildings();
+    return () => {
+      if (dsRef.current && viewer && !viewer.isDestroyed?.()) {
+        try {
+          viewer.dataSources.remove(dsRef.current);
+        } catch { /* viewer torn down */ }
+        dsRef.current = null;
+      }
+    };
+  }, [loadBuildings, viewer, isViewerReady, isVisible]);
+
+  return null; // invisible — renders via Cesium data sources
+};
+
+export default CadastralBuildingLayer;

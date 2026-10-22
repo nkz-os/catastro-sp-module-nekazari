@@ -1,0 +1,45 @@
+{
+  "name": "nkz-module-cadastral-spain",
+  "version": "1.0.0",
+  "description": "Spanish Cadastre integration module for Nekazari - Click to add parcels",
+  "license": "AGPL-3.0",
+  "packageManager": "pnpm@9.0.0",
+  "type": "module",
+  "main": "./src/Module.tsx",
+  "nkz": {
+    "moduleId": "catastro-spain"
+  },
+  "scripts": {
+    "dev": "vite --port 5004",
+    "build": "vite build",
+    "build:module": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "_mfVitePin": "@module-federation/vite must stay ≤1.16.8 — resolved via @nekazari/module-builder. >=1.16.9 breaks host (circular react⇄design-tokens, incident 2026-06-24, PR #703). Verify on module-builder bumps: grep @module-federation/vite pnpm-lock.yaml",
+  "dependencies": {
+    "@nekazari/design-tokens": "^0.1.0-alpha.0",
+    "@nekazari/sdk": "^1.0.3",
+    "@nekazari/ui-kit": "^1.0.2-alpha.4",
+    "@nekazari/viewer-kit": "^0.1.1-alpha.0",
+    "axios": "^1.6.0",
+    "lucide-react": "^0.424.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0"
+  },
+  "devDependencies": {
+    "@nekazari/module-builder": "^2.0.3",
+    "@nekazari/module-kit": "^0.6.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "i18next": "^26.2.0",
+    "postcss": "^8.4.39",
+    "react-i18next": "^17.0.8",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.2.2",
+    "vite": "^5.3.1"
+  }
+}

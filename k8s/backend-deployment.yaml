@@ -1,0 +1,125 @@
+# =============================================================================
+# Catastro Spain Backend Deployment (template)
+# =============================================================================
+# Production image pins: gitops-config/overlays/modules/catastro-sp/
+# Do not apply this file in production — use the gitops-config overlay.
+# =============================================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catastro-spain-backend
+  namespace: nekazari
+  labels:
+    app: catastro-spain-backend
+    component: backend
+    module: catastro-spain
+    nkz-os.org/profile: addon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catastro-spain-backend
+  template:
+    metadata:
+      labels:
+        app: catastro-spain-backend
+        component: backend
+        module: catastro-spain
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/nkz-os/catastro-sp-module-nekazari/catastro-backend:REPLACE_WITH_GIT_SHA
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: catastro-sp-config
+                optional: true
+          env:
+            - name: APP_NAME
+              value: "Catastro Spain"
+            - name: DEBUG
+              value: "false"
+            - name: API_PREFIX
+              value: "/api/cadastral-api"
+            - name: KEYCLOAK_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: catastro-sp-config
+                  key: KEYCLOAK_URL
+            - name: KEYCLOAK_REALM
+              value: "nekazari"
+            - name: JWT_AUDIENCE
+              value: "account"
+            - name: HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: secret
+                  optional: true
+            - name: MODULE_MANAGEMENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: module-secrets
+                  key: management-key
+                  optional: true
+            - name: POSTGRES_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secret
+                  key: postgres-url
+            - name: ENTITY_MANAGER_URL
+              value: "http://entity-manager-service:5000"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 1
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catastro-spain-api-service
+  namespace: nekazari
+  labels:
+    app: catastro-spain-backend
+    component: backend
+    module: catastro-spain
+spec:
+  type: ClusterIP
+  selector:
+    app: catastro-spain-backend
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
+      protocol: TCP
