@@ -82,6 +82,7 @@
     "use": "Use",
     "slope": "Slope",
     "irrigation": "Irrigation coef.",
-    "attribution": "Source: SIGPAC, FEGA (CC BY 4.0)"
+    "attribution": "Source: SIGPAC, FEGA (CC BY 4.0)",
+    "pending": "Update started; it will appear shortly."
   }
 }

@@ -1,5 +1,7 @@
 """SIGPAC routes: auth, backfill, notifications, create hook. Synthetic tenants only."""
 
+import json
+from concurrent.futures import Future
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,7 +17,21 @@ SECRET = 'unit-test-secret'
 
 class InlineExecutor:
     def submit(self, fn, *a, **kw):
-        fn(*a, **kw)
+        f = Future()
+        try:
+            f.set_result(fn(*a, **kw))
+        except Exception as exc:
+            f.set_exception(exc)
+        return f
+
+
+class NeverExecutor:
+    def submit(self, fn, *a, **kw):
+        return Future()
+
+
+PARCEL_ENTITY = {'id': 'urn:ngsi-ld:AgriParcel:p1', 'type': 'AgriParcel',
+                 'location': {'type': 'GeoProperty', 'value': PARCEL}}
 
 
 @pytest.fixture
@@ -23,6 +39,8 @@ def client(monkeypatch):
     app.config['TESTING'] = True
     monkeypatch.setenv('INTERNAL_SERVICE_SECRET', SECRET)
     monkeypatch.setattr(rt, '_executor', InlineExecutor())
+    monkeypatch.setattr(rt, '_backfill_executor', InlineExecutor())
+    monkeypatch.setattr('app.orion_client.get_entity', lambda *a, **k: dict(PARCEL_ENTITY))
     rt._recent.clear()
     return app.test_client()
 
@@ -39,14 +57,36 @@ def test_refresh_ok_includes_attribution(client, monkeypatch):
     assert r.status_code == 200
     assert r.get_json()['source']['license'] == 'CC BY 4.0'
     args = rt.svc.refresh_parcel.call_args
-    assert args.args == ('acme', 'urn:ngsi-ld:AgriParcel:p1')
-    assert args.kwargs == {'only_if_missing': True}
+    assert args.args[:2] == ('acme', 'urn:ngsi-ld:AgriParcel:p1')
+    assert args.kwargs['only_if_missing'] is True
 
 
 def test_refresh_error_is_502(client, monkeypatch):
     monkeypatch.setattr(rt.svc, 'refresh_parcel', MagicMock(return_value={'status': 'error'}))
     r = client.post('/api/cadastral-api/parcels/p1/sigpac/refresh', headers={'X-Tenant-ID': 'acme'})
     assert r.status_code == 502
+
+
+def test_refresh_404_when_parcel_missing(client, monkeypatch):
+    monkeypatch.setattr('app.orion_client.get_entity', lambda *a, **k: None)
+    m = MagicMock(); monkeypatch.setattr(rt.svc, 'refresh_parcel', m)
+    r = client.post('/api/cadastral-api/parcels/p1/sigpac/refresh', headers={'X-Tenant-ID': 'acme'})
+    assert r.status_code == 404
+    m.assert_not_called()
+
+
+def test_refresh_404_for_other_entity_types(client, monkeypatch):
+    monkeypatch.setattr('app.orion_client.get_entity',
+                        lambda *a, **k: {'id': 'urn:ngsi-ld:Device:x', 'type': 'Device'})
+    r = client.post('/api/cadastral-api/parcels/x/sigpac/refresh', headers={'X-Tenant-ID': 'acme'})
+    assert r.status_code == 404
+
+
+def test_refresh_is_bounded_and_answers_202(client, monkeypatch):
+    monkeypatch.setattr(rt, '_executor', NeverExecutor())
+    monkeypatch.setattr(rt, 'REFRESH_WAIT_S', 0.01)
+    r = client.post('/api/cadastral-api/parcels/p1/sigpac/refresh', headers={'X-Tenant-ID': 'acme'})
+    assert r.status_code == 202 and r.get_json()['status'] == 'pending'
 
 
 def test_get_reads_full_iri_attribute(client, monkeypatch):
@@ -71,7 +111,7 @@ class TestBackfill:
 
     def test_accepted_runs_backfill(self, client, monkeypatch):
         m = MagicMock()
-        monkeypatch.setattr(rt, 'run_backfill', m)
+        monkeypatch.setattr(rt, 'backfill_job', m)
         r = client.post('/api/cadastral-api/internal/sigpac/backfill',
                         headers={'X-Internal-Service-Secret': SECRET},
                         json={'tenant_id': 'acme', 'force': True})
@@ -96,6 +136,12 @@ class TestBackfill:
         calls.clear()
         rt.run_backfill('acme', force=True, orion=orion)
         assert calls == ['urn:ngsi-ld:AgriParcel:a', 'urn:ngsi-ld:AgriParcel:b']
+
+    def test_backfill_job_logs_and_survives_errors(self, monkeypatch, caplog):
+        monkeypatch.setattr(rt, 'run_backfill', MagicMock(side_effect=RuntimeError('orion down')))
+        with caplog.at_level('ERROR'):
+            rt.backfill_job('acme', False)
+        assert 'acme' in caplog.text and 'orion down' in caplog.text
 
     def test_run_backfill_paginates(self, monkeypatch):
         orion = MagicMock()
@@ -140,6 +186,17 @@ class TestNotify:
             client.post(self.URL, json=self.body(), headers=self.headers())
         assert m.call_count == 1
 
+    def test_create_and_notify_share_one_dedupe_key(self, client, monkeypatch):
+        m = MagicMock(); monkeypatch.setattr(rt.svc, 'refresh_parcel', m)
+        urn = 'urn:ngsi-ld:AgriParcel:n1'
+        # create path: tenant as received, geometry as sent by the user
+        assert rt.trigger_refresh('ACME', urn, PARCEL) is True
+        # notification: Orion round-trip changes float noise below 1e-7 deg
+        noisy = json.loads(json.dumps(PARCEL).replace('42.6684', '42.66840000001'))
+        client.post(self.URL, json={'data': [{'id': urn, 'location': {'type': 'GeoProperty', 'value': noisy}}]},
+                    headers=self.headers())
+        assert m.call_count == 1
+
     def test_deleted_ignored(self, client, monkeypatch):
         m = MagicMock(); monkeypatch.setattr(rt.svc, 'refresh_parcel', m)
         b = self.body(); b['data'][0]['deleted'] = True
@@ -157,9 +214,10 @@ def test_subscription_declaration(monkeypatch):
     from app import sigpac_subscription as sub
     monkeypatch.setenv('SIGPAC_NOTIFY_URL', 'http://recv.local:5000/api/cadastral-api/orion/sigpac-notify')
     monkeypatch.setenv('INTERNAL_SERVICE_SECRET', SECRET)
-    monkeypatch.setenv('NKZ_NOTIFY_DERIVED_TOKENS', 'true')
+    monkeypatch.delenv('NKZ_NOTIFY_DERIVED_TOKENS', raising=False)
     reg = sub.build_registrar()
     body = reg._body(reg._subs[0], 'acme')
     assert body['watchedAttributes'] == ['location']
+    assert 'throttling' not in body      # Orion throttles per subscription: would drop events
     keys = [h['key'] for h in body['notification']['endpoint']['receiverInfo']]
     assert keys == ['X-Notification-Token']

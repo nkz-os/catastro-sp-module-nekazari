@@ -11,7 +11,7 @@ export interface SigpacEnclosure {
 
 export interface SigpacResult {
   enclosures: SigpacEnclosure[] | null;
-  status?: 'updated' | 'skipped';
+  status?: 'updated' | 'skipped' | 'pending';
   reason?: string;
 }
 

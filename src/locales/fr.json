@@ -11,6 +11,7 @@
     "use": "Usage",
     "slope": "Pente",
     "irrigation": "Coef. d'irrigation",
-    "attribution": "Source : SIGPAC, FEGA (CC BY 4.0)"
+    "attribution": "Source : SIGPAC, FEGA (CC BY 4.0)",
+    "pending": "Mise à jour en cours ; elle apparaîtra bientôt."
   }
 }

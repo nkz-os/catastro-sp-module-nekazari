@@ -11,7 +11,7 @@ import logging
 import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any, Optional
 
 from flask import Blueprint, g, jsonify, request
@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 sigpac_bp = Blueprint('sigpac', __name__, url_prefix='/api/cadastral-api')
 
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='sigpac')
+# Backfills are long; they must not starve interactive refreshes.
+_backfill_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='sigpac-backfill')
+
+# gunicorn runs sync with a 120 s timeout: the interactive route waits at most this long
+# and answers 202 if the job is still running (the job keeps going and stores its result).
+REFRESH_WAIT_S = 45
+REFRESH_DEADLINE_S = 40
+BACKGROUND_DEADLINE_S = 300
 
 # Background triggers (create / geometry-change notification) overlap for one
 # creation; repeat work for the same geometry inside this window is skipped.
@@ -48,9 +56,26 @@ def _geometry(entity: dict) -> Optional[dict]:
     return None
 
 
+def _round_coords(value: Any) -> Any:
+    if isinstance(value, (int, float)):
+        return round(float(value), 6)
+    if isinstance(value, (list, tuple)):
+        return [_round_coords(v) for v in value]
+    return value
+
+
+def geometry_digest(geometry: dict) -> str:
+    """Stable across an Orion round-trip: type + coordinates rounded to 1e-6 deg (~0.1 m)."""
+    norm = {'type': geometry.get('type'), 'coordinates': _round_coords(geometry.get('coordinates'))}
+    return hashlib.sha256(json.dumps(norm, sort_keys=True).encode()).hexdigest()
+
+
+def _is_parcel(entity: dict) -> bool:
+    return str(entity.get('type', '')).rsplit('/', 1)[-1] == 'AgriParcel'
+
+
 def _seen_recently(tenant_id: str, urn: str, geometry: dict) -> bool:
-    digest = hashlib.sha256(json.dumps(geometry, sort_keys=True).encode()).hexdigest()
-    key = (tenant_id, urn, digest)
+    key = (tenant_id.lower(), urn, geometry_digest(geometry))
     now = time.time()
     with _recent_lock:
         for k in [k for k, t in _recent.items() if now - t > RECENT_TTL_S]:
@@ -65,8 +90,15 @@ def trigger_refresh(tenant_id: str, urn: str, geometry: dict, **kw: Any) -> bool
     """Queue a background refresh unless the same geometry was handled recently."""
     if _seen_recently(tenant_id, urn, geometry):
         return False
-    _executor.submit(svc.refresh_parcel, tenant_id, urn, geometry, **kw)
+    _executor.submit(_refresh_job, tenant_id.lower(), urn, geometry, BACKGROUND_DEADLINE_S, **kw)
     return True
+
+
+def _refresh_job(tenant_id: str, urn: str, geometry: Optional[dict], deadline_s: float,
+                 only_if_missing: bool = False) -> dict:
+    return svc.refresh_parcel(tenant_id, urn, geometry,
+                              client=svc.FegaClient(deadline_s=deadline_s),
+                              only_if_missing=only_if_missing)
 
 
 def _internal_authorized() -> bool:
@@ -82,9 +114,18 @@ def _internal_authorized() -> bool:
 @sigpac_bp.route('/parcels/<path:parcel_id>/sigpac/refresh', methods=['POST'])
 @require_auth
 def refresh_sigpac(parcel_id):
+    from app.orion_client import get_entity
     body = request.get_json(silent=True) or {}
-    result = svc.refresh_parcel(g.tenant_id, parcel_urn(parcel_id),
-                                only_if_missing=bool(body.get('onlyIfMissing')))
+    urn = parcel_urn(parcel_id)
+    entity = get_entity(g.tenant_id, urn)
+    if not entity or not _is_parcel(entity):
+        return jsonify({'error': 'Parcel not found'}), 404
+    future = _executor.submit(_refresh_job, g.tenant_id.lower(), urn, _geometry(entity),
+                              REFRESH_DEADLINE_S, bool(body.get('onlyIfMissing')))
+    try:
+        result = future.result(timeout=REFRESH_WAIT_S)
+    except FutureTimeout:
+        return jsonify({'status': 'pending'}), 202
     if result['status'] == 'error':
         return jsonify({'error': 'SIGPAC lookup failed'}), 502
     result['source'] = get_source(FEGA_SIGPAC)
@@ -130,6 +171,16 @@ def run_backfill(tenant_id: str, force: bool = False, client=None, orion=None) -
     return counts
 
 
+def backfill_job(tenant_id: str, force: bool) -> None:
+    """Executor entry point: a failed backfill is logged with its tenant, never lost silently."""
+    try:
+        run_backfill(tenant_id, force)
+    except Exception as exc:
+        logger.error('sigpac.backfill %s', json.dumps(
+            {'tenant': tenant_id, 'status': 'error',
+             'error': f'{type(exc).__name__}: {exc}'}, sort_keys=True))
+
+
 @sigpac_bp.route('/internal/sigpac/backfill', methods=['POST'])
 def backfill_sigpac():
     if not _internal_authorized():
@@ -138,7 +189,7 @@ def backfill_sigpac():
     tenant_id = body.get('tenant_id')
     if not isinstance(tenant_id, str) or not tenant_id:
         return jsonify({'error': 'tenant_id required'}), 400
-    _executor.submit(run_backfill, tenant_id, bool(body.get('force')))
+    _backfill_executor.submit(backfill_job, tenant_id, bool(body.get('force')))
     return jsonify({'status': 'accepted', 'tenant_id': tenant_id}), 202
 
 

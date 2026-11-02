@@ -17,16 +17,15 @@ HEAL_INTERVAL_MIN = 60
 
 def build_registrar():
     from nkz_platform_sdk import SubscriptionRegistrar
-    from nkz_platform_sdk.notify_auth import derived_tokens_from_env
     return SubscriptionRegistrar(
         orion_url=os.getenv('ORION_URL', 'http://orion-ld-service:1026'),
         notification_url=os.environ['SIGPAC_NOTIFY_URL'],
-        subscriptions=[{'type': 'AgriParcel', 'throttling': 5,
+        subscriptions=[{'type': 'AgriParcel', 'throttling': None,
                         'watched_attributes': ['location']}],
         module_name=MODULE_NAME,
         context_url=os.getenv('CONTEXT_URL') or None,
         internal_secret=os.getenv('INTERNAL_SERVICE_SECRET', ''),
-        derived_tokens=derived_tokens_from_env(),
+        derived_tokens=True,   # a new receiver never gets the master secret in receiverInfo
     )
 
 

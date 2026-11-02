@@ -98,9 +98,11 @@ class TestOverlaps:
         wrong = [e for e in out if e['reference'] != '31:97:0:0:4:229:1']
         assert all(e['enclosureAreaHa'] is None for e in wrong)
 
-    def test_canarias_uses_utm_28(self):
+    def test_utm_zone_by_longitude(self):
         assert sp._metric_epsg(-16.0) == 25828
+        assert sp._metric_epsg(-8.0) == 25829
         assert sp._metric_epsg(-2.0) == 25830
+        assert sp._metric_epsg(2.5) == 25831
 
 
 class TestSpain:
@@ -109,11 +111,21 @@ class TestSpain:
         paris = mapping(box(2.30, 48.85, 2.31, 48.86))
         assert not sp.is_in_spain(paris)
 
+    @pytest.mark.parametrize('lon,lat', [(-5.31, 35.89), (-2.94, 35.29), (2.65, 39.57),
+                                         (-16.5, 28.3), (-2.03, 42.67)])
+    def test_spanish_places_inside(self, lon, lat):
+        assert sp.is_in_spain(mapping(box(lon, lat, lon + 0.001, lat + 0.001)))
+
+    @pytest.mark.parametrize('lon,lat', [(-9.14, 38.72), (-8.61, 41.15), (2.9, 42.7), (1.52, 42.5),
+                                         (-7.6, 33.6)])
+    def test_neighbours_outside(self, lon, lat):
+        assert not sp.is_in_spain(mapping(box(lon, lat, lon + 0.001, lat + 0.001)))
+
 
 class TestClient:
     def test_retry_then_success(self):
         s = MagicMock()
-        s.get.side_effect = [resp(503), requests.Timeout(), resp(200, {'features': [1], 'links': []})]
+        s.get.side_effect = [resp(503), requests.Timeout(), resp(200, {'type': 'FeatureCollection', 'features': [1], 'links': []})]
         sleeps = []
         c = sp.FegaClient(session=s, sleep=sleeps.append)
         assert c.candidates_in_bbox((0, 0, 1, 1)) == [1]
@@ -137,11 +149,39 @@ class TestClient:
     def test_pagination_follows_next(self):
         s = MagicMock()
         s.get.side_effect = [
-            resp(200, {'features': [1], 'links': [{'rel': 'next', 'href': 'https://x/next'}]}),
-            resp(200, {'features': [2], 'links': []})]
+            resp(200, {'type': 'FeatureCollection', 'features': [1], 'links': [{'rel': 'next', 'href': 'https://x/next'}]}),
+            resp(200, {'type': 'FeatureCollection', 'features': [2], 'links': []})]
         c = sp.FegaClient(session=s, sleep=lambda _: None)
         assert c.candidates_in_bbox((0, 0, 1, 1)) == [1, 2]
         assert s.get.call_args_list[1].args[0] == 'https://x/next'
+
+    @pytest.mark.parametrize('body', [{'code': 'InvalidParameterValue'}, [], {'type': 'FeatureCollection'},
+                                      {'type': 'FeatureCollection', 'features': 'x'}, None])
+    def test_non_feature_collection_is_an_error(self, body):
+        s = MagicMock()
+        s.get.return_value = resp(200, body)
+        with pytest.raises(sp.FegaError):
+            sp.FegaClient(session=s, sleep=lambda _: None).candidates_in_bbox((0, 0, 1, 1))
+
+    def test_valid_empty_collection_is_empty(self):
+        s = MagicMock()
+        s.get.return_value = resp(200, {'type': 'FeatureCollection', 'features': [], 'links': []})
+        assert sp.FegaClient(session=s).candidates_in_bbox((0, 0, 1, 1)) == []
+
+    def test_deadline_stops_requests(self):
+        s = MagicMock()
+        c = sp.FegaClient(session=s, deadline_s=-1)
+        with pytest.raises(sp.FegaError):
+            c.enclosure_at(0, 0)
+        s.get.assert_not_called()
+
+    def test_each_thread_gets_its_own_session(self):
+        import threading
+        c = sp.FegaClient()
+        seen = []
+        t = threading.Thread(target=lambda: seen.append(c._session()))
+        t.start(); t.join()
+        assert seen[0] is not c._session()
 
     def test_enclosure_at_empty_is_none(self):
         s = MagicMock()
@@ -153,6 +193,12 @@ class TestReadTolerance:
     @pytest.mark.parametrize('name', list(sp.ATTR_ALIASES))
     def test_reads_any_attribute_name(self, name):
         ent = {name: {'type': 'Property', 'value': [{'reference': 'a'}]}}
+        assert sp.read_enclosures(ent) == [{'reference': 'a'}]
+
+    @pytest.mark.parametrize('name', list(sp.ATTR_ALIASES))
+    def test_single_enclosure_compacted_to_object(self, name):
+        # Orion-LD compacts a one-element array into the bare element
+        ent = {name: {'type': 'Property', 'value': {'reference': 'a'}}}
         assert sp.read_enclosures(ent) == [{'reference': 'a'}]
 
     def test_absent_is_none(self):
@@ -209,6 +255,15 @@ class TestRefresh:
         r = sp.refresh_parcel('acme', self.URN, client=FakeClient(), orion=orion,
                               only_if_missing=True)
         assert r['reason'] == 'already_present'
+        orion.append_entity_attrs.assert_not_called()
+
+    def test_invalid_fega_body_never_overwrites(self):
+        orion = MagicMock()
+        sess = MagicMock()
+        sess.get.return_value = resp(200, {'code': 'InvalidParameterValue'})
+        client = sp.FegaClient(session=sess, sleep=lambda _: None)
+        r = sp.refresh_parcel('acme', self.URN, geometry=PARCEL, client=client, orion=orion)
+        assert r['status'] == 'error'
         orion.append_entity_attrs.assert_not_called()
 
     def test_write_error_reported_not_raised(self):

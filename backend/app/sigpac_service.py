@@ -11,6 +11,7 @@ A failed lookup never removes a previously stored value.
 import json
 import logging
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -18,9 +19,10 @@ from typing import Any, Callable, Optional
 
 import requests
 from pyproj import Transformer
-from shapely.geometry import shape
+from shapely.geometry import Point, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform
+from shapely.prepared import prep
 from shapely.validation import make_valid
 
 from app.sources import FEGA_SIGPAC
@@ -47,14 +49,13 @@ ATTR_ALIASES = (
     'https://uri.etsi.org/ngsi-ld/default-context/sigpacEnclosures',
 )
 
-# Rough bounding boxes (lon_min, lat_min, lon_max, lat_max): mainland+Balearics,
-# Canarias, Ceuta, Melilla. Border slack is harmless: FEGA answers empty there.
-_SPAIN_BOXES = (
-    (-9.6, 35.8, 4.5, 43.9),
-    (-18.4, 27.5, -13.2, 29.6),
-    (-5.5, 35.8, -5.2, 36.0),
-    (-3.1, 35.2, -2.8, 35.4),
-)
+# Spain outline (Natural Earth, public domain; see the file's properties), buffered ~2 km.
+_OUTLINE_PATH = os.path.join(os.path.dirname(__file__), 'geometry_data', 'spain_outline.geojson')
+_outline = None
+_outline_lock = threading.Lock()
+
+# One limit for every path (user refresh, notifications, backfill) against the FEGA.
+_fega_slots = threading.BoundedSemaphore(MAX_CONCURRENCY)
 
 
 class FegaError(Exception):
@@ -91,17 +92,32 @@ def _polygonal(geom: BaseGeometry) -> BaseGeometry:
     return MultiPolygon(parts) if parts else Polygon()
 
 
+def _spain_outline():
+    global _outline
+    with _outline_lock:
+        if _outline is None:
+            with open(_OUTLINE_PATH, encoding='utf-8') as fh:
+                _outline = prep(shape(json.load(fh)['geometry']))
+        return _outline
+
+
 def is_in_spain(geometry: dict) -> bool:
     try:
         c = _to_shape(geometry).centroid
     except Exception:
         return False
-    return any(b[0] <= c.x <= b[2] and b[1] <= c.y <= b[3] for b in _SPAIN_BOXES)
+    return _spain_outline().contains(Point(c.x, c.y))
 
 
 def _metric_epsg(lon: float) -> int:
-    """ETRS89 UTM 30N (EPSG:25830); Canarias use 28N, where 30N would distort areas."""
-    return 25828 if lon < -12.0 else 25830
+    """ETRS89 UTM zone by longitude: 28N Canarias, 29N west of -6, 30N, 31N east of 0."""
+    if lon < -12.0:
+        return 25828
+    if lon < -6.0:
+        return 25829
+    if lon < 0.0:
+        return 25830
+    return 25831
 
 
 def _transformers(lon: float) -> tuple[Callable, Callable]:
@@ -160,22 +176,43 @@ def find_overlaps(parcel_geometry: dict, candidates: list[dict]) -> list[dict]:
 
 class FegaClient:
     def __init__(self, base_url: str = FEGA_BASE_URL, session: Any = None,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep,
+                 deadline_s: Optional[float] = None):
         self.base_url = base_url.rstrip('/')
-        self.session = session or requests.Session()
+        self._injected = session
+        self._local = threading.local()
         self._sleep = sleep
+        self._deadline = None if deadline_s is None else time.monotonic() + deadline_s
+
+    def _session(self) -> Any:
+        """One requests.Session per thread (Session is not guaranteed thread-safe)."""
+        if self._injected is not None:
+            return self._injected
+        if not hasattr(self._local, 'session'):
+            self._local.session = requests.Session()
+        return self._local.session
+
+    def _remaining(self) -> Optional[float]:
+        return None if self._deadline is None else self._deadline - time.monotonic()
 
     def _get_json(self, url: str, params: Optional[dict] = None) -> Any:
         last: Optional[Exception] = None
         for attempt in range(MAX_RETRIES):
             if attempt:
                 self._sleep(BACKOFF_BASE_S * (2 ** (attempt - 1)))
+            left = self._remaining()
+            if left is not None and left <= 0:
+                raise FegaError('FEGA deadline exceeded')
+            if not _fega_slots.acquire(timeout=left if left is not None else 60):
+                raise FegaError('FEGA concurrency slot not available in time')
             try:
-                resp = self.session.get(url, params=params, timeout=REQUEST_TIMEOUT_S,
-                                        headers={'Accept': 'application/json'})
+                resp = self._session().get(url, params=params, timeout=REQUEST_TIMEOUT_S,
+                                           headers={'Accept': 'application/json'})
             except requests.RequestException as exc:
                 last = exc
                 continue
+            finally:
+                _fega_slots.release()
             if resp.status_code == 429 or resp.status_code >= 500:
                 last = FegaError(f'HTTP {resp.status_code}')
                 continue
@@ -198,7 +235,11 @@ class FegaClient:
         features: list[dict] = []
         for _ in range(MAX_OGC_PAGES):
             data = self._get_json(url, params)
-            features.extend(data.get('features') or [])
+            # A 200 that is not a FeatureCollection is an error body, never "no recintos".
+            if (not isinstance(data, dict) or data.get('type') != 'FeatureCollection'
+                    or not isinstance(data.get('features'), list)):
+                raise FegaError('FEGA answered something other than a FeatureCollection')
+            features.extend(data['features'])
             nxt = next((l.get('href') for l in data.get('links') or []
                         if l.get('rel') == 'next' and l.get('href')), None)
             if not nxt:
@@ -291,6 +332,8 @@ def read_enclosures(entity: Optional[dict]) -> Optional[list[dict]]:
         if attr is None:
             continue
         value = attr.get('value') if isinstance(attr, dict) else attr
+        if isinstance(value, dict):
+            return [value]      # Orion-LD compacts a one-element array to the bare element
         if isinstance(value, list):
             return value
     return None

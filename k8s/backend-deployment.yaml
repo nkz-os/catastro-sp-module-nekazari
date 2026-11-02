@@ -75,6 +75,12 @@ spec:
                   key: postgres-url
             - name: ENTITY_MANAGER_URL
               value: "http://entity-manager-service:5000"
+            - name: SIGPAC_NOTIFY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: catastro-sp-config
+                  key: SIGPAC_NOTIFY_URL
+                  optional: true
             - name: INTERNAL_SERVICE_SECRET
               valueFrom:
                 secretKeyRef:

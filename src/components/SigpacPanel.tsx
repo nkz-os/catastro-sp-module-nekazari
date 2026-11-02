@@ -36,7 +36,12 @@ export const SigpacPanel: React.FC = () => {
     setMsg(null);
     try {
       const r = await refreshSigpac(selectedEntityId as string);
-      if (r.status === 'skipped' && r.reason === 'outside_spain') setMsg(t('sigpac.outside'));
+      if (r.status === 'pending') {
+        setMsg(t('sigpac.pending'));
+        window.setTimeout(() => {
+          getSigpac(selectedEntityId as string).then((g) => setItems(g.enclosures)).catch(() => undefined);
+        }, 15000);
+      } else if (r.status === 'skipped' && r.reason === 'outside_spain') setMsg(t('sigpac.outside'));
       else setItems((r as any).enclosures ?? null);
     } catch {
       setMsg(t('sigpac.error'));

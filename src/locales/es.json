@@ -82,6 +82,7 @@
     "use": "Uso",
     "slope": "Pendiente",
     "irrigation": "Coef. regadío",
-    "attribution": "Fuente: SIGPAC, FEGA (CC BY 4.0)"
+    "attribution": "Fuente: SIGPAC, FEGA (CC BY 4.0)",
+    "pending": "Actualización en curso; aparecerá en breve."
   }
 }
