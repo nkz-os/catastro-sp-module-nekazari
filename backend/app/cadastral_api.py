@@ -446,6 +446,14 @@ def create_parcel():
             logger.error('entity-manager create failed — refusing PostGIS-only fallback')
             return jsonify({'error': 'Failed to create parcel in entity-manager'}), 502
 
+        # SIGPAC enclosures (best effort, background; skipped outside Spain)
+        try:
+            from app.sigpac_routes import trigger_refresh
+            trigger_refresh(tenant_id, em_id if str(em_id).startswith('urn:')
+                            else f'urn:ngsi-ld:AgriParcel:{em_id}', geometry)
+        except Exception as exc:
+            logger.warning('SIGPAC trigger failed for %s: %s', em_id, exc)
+
         # ---- Secondary write: local PostGIS read-model ----
         conn = None
         cur = None
@@ -1433,6 +1441,11 @@ def get_parcel_buildings(parcel_id):
 
 # Register blueprint (must be at module level — gunicorn never sees __main__)
 app.register_blueprint(api_bp)
+
+from app.sigpac_routes import sigpac_bp  # noqa: E402
+from app.sigpac_subscription import start_background as _start_sigpac_subscription  # noqa: E402
+app.register_blueprint(sigpac_bp)
+_start_sigpac_subscription()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
