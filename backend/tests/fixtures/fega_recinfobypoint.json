@@ -1,0 +1,82 @@
+{
+ "228": [
+  {
+   "provincia": 31,
+   "municipio": 97,
+   "agregado": 0,
+   "zona": 0,
+   "poligono": 4,
+   "parcela": 228,
+   "recinto": 1,
+   "superficie": 1.0313,
+   "pendiente_media": 2.6,
+   "coef_regadio": 0,
+   "admisibilidad": null,
+   "incidencias": "75",
+   "uso_sigpac": "ZU",
+   "region": null,
+   "altitud": 420,
+   "srid": 4326
+  }
+ ],
+ "90020": [
+  {
+   "provincia": 31,
+   "municipio": 97,
+   "agregado": 0,
+   "zona": 0,
+   "poligono": 4,
+   "parcela": 90020,
+   "recinto": 1,
+   "superficie": 35.7305,
+   "pendiente_media": 10.7,
+   "coef_regadio": 0,
+   "admisibilidad": null,
+   "incidencias": "75",
+   "uso_sigpac": "ZU",
+   "region": null,
+   "altitud": 430,
+   "srid": 4326
+  }
+ ],
+ "417": [
+  {
+   "provincia": 31,
+   "municipio": 97,
+   "agregado": 0,
+   "zona": 0,
+   "poligono": 4,
+   "parcela": 417,
+   "recinto": 1,
+   "superficie": 3.4654,
+   "pendiente_media": 8.2,
+   "coef_regadio": 0,
+   "admisibilidad": null,
+   "incidencias": "75",
+   "uso_sigpac": "ZU",
+   "region": null,
+   "altitud": 421,
+   "srid": 4326
+  }
+ ],
+ "229": [
+  {
+   "provincia": 31,
+   "municipio": 97,
+   "agregado": 0,
+   "zona": 0,
+   "poligono": 4,
+   "parcela": 229,
+   "recinto": 1,
+   "superficie": 0.2362,
+   "pendiente_media": 3.6,
+   "coef_regadio": 0,
+   "admisibilidad": null,
+   "incidencias": "75",
+   "uso_sigpac": "ZU",
+   "region": null,
+   "altitud": 421,
+   "srid": 4326
+  }
+ ]
+}

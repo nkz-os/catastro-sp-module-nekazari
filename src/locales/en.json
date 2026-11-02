@@ -69,5 +69,20 @@
     "notFound": "No cadastral information was found for this location.",
     "serviceUnavailable": "The cadastral service is temporarily unavailable. Please try again later.",
     "generic": "Error processing parcel"
+  },
+  "sigpac": {
+    "title": "SIGPAC enclosures",
+    "update": "Update SIGPAC",
+    "updating": "Updating...",
+    "empty": "No SIGPAC enclosure overlaps this parcel.",
+    "none": "Not retrieved yet.",
+    "error": "SIGPAC lookup failed. The previous data is kept.",
+    "outside": "The parcel is outside Spain.",
+    "overlap": "{{pct}} % of the parcel ({{ha}} ha)",
+    "use": "Use",
+    "slope": "Slope",
+    "irrigation": "Irrigation coef.",
+    "attribution": "Source: SIGPAC, FEGA (CC BY 4.0)",
+    "pending": "Update started; it will appear shortly."
   }
 }

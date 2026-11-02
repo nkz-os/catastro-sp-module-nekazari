@@ -4,6 +4,7 @@ import { CadastralClickToggle } from '../components/CadastralClickToggle';
 import { GeoSearchBar } from '../components/GeoSearchBar';
 import { CadastralBuildingLayer } from '../components/CadastralBuildingLayer';
 import { CadastralBuildingsToggle } from '../components/CadastralBuildingsToggle';
+import { SigpacPanel } from '../components/SigpacPanel';
 import { CadastralProvider } from '../context/CadastralContext';
 import type { ModuleViewerSlots, SlotWidgetDefinition } from '@nekazari/sdk';
 
@@ -58,7 +59,15 @@ export const moduleSlots: ModuleViewerSlots = {
       localComponent: CadastralBuildingsToggle,
     },
   ],
-  'context-panel': [],
+  'context-panel': [
+    {
+      id: 'catastro-spain-sigpac-panel',
+      moduleId: MODULE_ID,
+      component: 'SigpacPanel',
+      priority: 50,
+      localComponent: SigpacPanel,
+    },
+  ],
   'bottom-panel': [],
   'entity-tree': [],
 

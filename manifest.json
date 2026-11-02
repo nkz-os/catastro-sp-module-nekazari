@@ -50,7 +50,7 @@
   "slots": {
     "map-layer": ["CadastralMapClickHandler", "GeoSearchBar"],
     "layer-toggle": ["CadastralClickToggle"],
-    "context-panel": [],
+    "context-panel": ["SigpacPanel"],
     "bottom-panel": [],
     "entity-tree": []
   },
@@ -91,7 +91,14 @@
             "priority": 15
           }
         ],
-        "context-panel": [],
+        "context-panel": [
+          {
+            "id": "catastro-spain-sigpac-panel",
+            "moduleId": "catastro-spain",
+            "component": "SigpacPanel",
+            "priority": 50
+          }
+        ],
         "bottom-panel": [],
         "entity-tree": []
       }

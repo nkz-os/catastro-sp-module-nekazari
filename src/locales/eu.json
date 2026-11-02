@@ -1,0 +1,17 @@
+{
+  "sigpac": {
+    "title": "SIGPAC errekintoak",
+    "update": "Eguneratu SIGPAC",
+    "updating": "Eguneratzen...",
+    "empty": "Ez dago SIGPAC errekinturik partzela honekin gainjarrita.",
+    "none": "Oraindik ez da kontsultatu.",
+    "error": "SIGPAC kontsultak huts egin du. Aurreko datuak gordetzen dira.",
+    "outside": "Partzela Espainiatik kanpo dago.",
+    "overlap": "Partzelaren % {{pct}} ({{ha}} ha)",
+    "use": "Erabilera",
+    "slope": "Malda",
+    "irrigation": "Ureztatze koef.",
+    "attribution": "Iturria: SIGPAC, FEGA (CC BY 4.0)",
+    "pending": "Eguneratzea abian da; laster agertuko da."
+  }
+}
