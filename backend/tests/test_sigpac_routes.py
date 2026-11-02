@@ -1,6 +1,5 @@
 """SIGPAC routes: auth, backfill, notifications, create hook. Synthetic tenants only."""
 
-import json
 from unittest.mock import MagicMock
 
 import pytest

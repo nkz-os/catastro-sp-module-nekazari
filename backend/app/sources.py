@@ -9,7 +9,7 @@ SOURCES = {
         'publisher': 'Fondo Espanol de Garantia Agraria (FEGA)',
         'url': 'https://sigpac-hubcloud.es/',
         'license': 'CC BY 4.0',
-        'license_url': 'https://creativecommons.org/licenses/by/4.0/deed.es',
+        'license_url': 'https://creativecommons.org/licenses/by/4.0/',
         'attribution': 'Source: SIGPAC, FEGA (CC BY 4.0)',
     },
 }
