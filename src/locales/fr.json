@@ -1,0 +1,16 @@
+{
+  "sigpac": {
+    "title": "Enclos SIGPAC",
+    "update": "Mettre à jour SIGPAC",
+    "updating": "Mise à jour...",
+    "empty": "Aucun enclos SIGPAC ne recoupe cette parcelle.",
+    "none": "Pas encore consulté.",
+    "error": "La consultation SIGPAC a échoué. Les données précédentes sont conservées.",
+    "outside": "La parcelle est hors d'Espagne.",
+    "overlap": "{{pct}} % de la parcelle ({{ha}} ha)",
+    "use": "Usage",
+    "slope": "Pente",
+    "irrigation": "Coef. d'irrigation",
+    "attribution": "Source : SIGPAC, FEGA (CC BY 4.0)"
+  }
+}

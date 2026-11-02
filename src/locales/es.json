@@ -69,5 +69,19 @@
     "notFound": "No se encontró información catastral para esta ubicación.",
     "serviceUnavailable": "El servicio catastral no está disponible temporalmente. Inténtalo más tarde.",
     "generic": "Error al procesar la parcela"
+  },
+  "sigpac": {
+    "title": "Recintos SIGPAC",
+    "update": "Actualizar SIGPAC",
+    "updating": "Actualizando...",
+    "empty": "Ningún recinto SIGPAC se solapa con esta parcela.",
+    "none": "Aún no consultado.",
+    "error": "Falló la consulta a SIGPAC. Se conservan los datos anteriores.",
+    "outside": "La parcela está fuera de España.",
+    "overlap": "{{pct}} % de la parcela ({{ha}} ha)",
+    "use": "Uso",
+    "slope": "Pendiente",
+    "irrigation": "Coef. regadío",
+    "attribution": "Fuente: SIGPAC, FEGA (CC BY 4.0)"
   }
 }

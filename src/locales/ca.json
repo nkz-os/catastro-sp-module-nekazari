@@ -1,0 +1,16 @@
+{
+  "sigpac": {
+    "title": "Recintes SIGPAC",
+    "update": "Actualitza SIGPAC",
+    "updating": "S'està actualitzant...",
+    "empty": "Cap recinte SIGPAC se superposa amb aquesta parcel·la.",
+    "none": "Encara no consultat.",
+    "error": "La consulta a SIGPAC ha fallat. Es conserven les dades anteriors.",
+    "outside": "La parcel·la és fora d'Espanya.",
+    "overlap": "{{pct}} % de la parcel·la ({{ha}} ha)",
+    "use": "Ús",
+    "slope": "Pendent",
+    "irrigation": "Coef. de regadiu",
+    "attribution": "Font: SIGPAC, FEGA (CC BY 4.0)"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "sigpac": {
+    "title": "Recintos SIGPAC",
+    "update": "Atualizar SIGPAC",
+    "updating": "A atualizar...",
+    "empty": "Nenhum recinto SIGPAC se sobrepõe a esta parcela.",
+    "none": "Ainda não consultado.",
+    "error": "A consulta ao SIGPAC falhou. Os dados anteriores são mantidos.",
+    "outside": "A parcela está fora de Espanha.",
+    "overlap": "{{pct}} % da parcela ({{ha}} ha)",
+    "use": "Uso",
+    "slope": "Declive",
+    "irrigation": "Coef. de rega",
+    "attribution": "Fonte: SIGPAC, FEGA (CC BY 4.0)"
+  }
+}
