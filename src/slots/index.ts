@@ -1,7 +1,6 @@
 import React from 'react';
 import { CadastralMapClickHandler } from '../components/CadastralMapClickHandler';
 import { CadastralClickToggle } from '../components/CadastralClickToggle';
-import { GeoSearchBar } from '../components/GeoSearchBar';
 import { CadastralBuildingLayer } from '../components/CadastralBuildingLayer';
 import { CadastralBuildingsToggle } from '../components/CadastralBuildingsToggle';
 import { SigpacPanel } from '../components/SigpacPanel';
@@ -17,7 +16,6 @@ const MODULE_ID = 'catastro-spain';
  * All widgets include explicit moduleId for proper host integration.
  * This module adds:
  * - Click-to-add functionality for cadastral parcels on the /entities page
- * - Geocoding search bar to navigate to locations by name or postal code
  */
 export const moduleSlots: ModuleViewerSlots = {
   'map-layer': [
@@ -27,13 +25,6 @@ export const moduleSlots: ModuleViewerSlots = {
       component: 'CadastralMapClickHandler',
       priority: 100,
       localComponent: CadastralMapClickHandler,
-    },
-    {
-      id: 'catastro-spain-geo-search',
-      moduleId: MODULE_ID,
-      component: 'GeoSearchBar',
-      priority: 50,
-      localComponent: GeoSearchBar,
     },
     {
       id: 'catastro-spain-building-layer',

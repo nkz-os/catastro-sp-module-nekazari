@@ -48,7 +48,7 @@
     "remote_entry_url": "/modules/catastro-spain/remoteEntry.js"
   },
   "slots": {
-    "map-layer": ["CadastralMapClickHandler", "GeoSearchBar"],
+    "map-layer": ["CadastralMapClickHandler"],
     "layer-toggle": ["CadastralClickToggle"],
     "context-panel": ["SigpacPanel"],
     "bottom-panel": [],
@@ -63,12 +63,6 @@
             "moduleId": "catastro-spain",
             "component": "CadastralMapClickHandler",
             "priority": 100
-          },
-          {
-            "id": "catastro-spain-geo-search",
-            "moduleId": "catastro-spain",
-            "component": "GeoSearchBar",
-            "priority": 50
           },
           {
             "id": "catastro-spain-building-layer",
@@ -110,7 +104,6 @@
     "features": [
       "Spanish cadastre reverse geocoding",
       "Click-to-add parcel functionality",
-      "Geocoding search bar with Nominatim",
       "Multi-region support (Spain, Navarra, Euskadi)"
     ],
     "screenshots": []
