@@ -51,7 +51,7 @@ export interface EnclosureAt {
 }
 
 export class SigpacApiError extends Error {
-  constructor(public status: number, public code?: string) {
+  constructor(public status: number, public code?: string, public detail: Record<string, any> = {}) {
     super(`sigpac ${status}${code ? ` ${code}` : ''}`);
   }
 }
@@ -64,7 +64,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new SigpacApiError(res.status, data?.error);
+  if (!res.ok) throw new SigpacApiError(res.status, data?.error, data);
   return data as T;
 }
 
