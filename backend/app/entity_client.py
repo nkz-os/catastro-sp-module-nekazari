@@ -81,6 +81,7 @@ def create_parcel(
     tenant_id: str,
     parcel_data: dict[str, Any],
     user_id: str = WORKER_USER_ID,
+    bearer_token: Optional[str] = None,
 ) -> Optional[str]:
     """Create an AgriParcel via entity-manager.
 
@@ -93,10 +94,17 @@ def create_parcel(
         The created parcel ID (string) on success, None on failure.
     """
     try:
+        headers = _headers(tenant_id, user_id)
+        if bearer_token:
+            # entity-manager authenticates writes with a user JWT (or an API key):
+            # a user-initiated creation forwards the caller's own token.
+            headers['Authorization'] = f'Bearer {bearer_token}'
+            headers['X-Auth-Signature'] = _hmac_signature(bearer_token, tenant_id)
+        # entity-manager serves /entities/parcels; /api/... is the gateway's path.
         resp = requests.post(
-            f'{ENTITY_MANAGER_URL}/api/entities/parcels',
+            f'{ENTITY_MANAGER_URL}/entities/parcels',
             json=parcel_data,
-            headers=_headers(tenant_id, user_id),
+            headers=headers,
             timeout=30,
         )
         if resp.status_code in (200, 201):

@@ -19,7 +19,7 @@ from shapely.geometry import box, mapping
 
 from app import sigpac_select as sel
 from app import sigpac_service as svc
-from app.auth_middleware import require_auth
+from app.auth_middleware import _get_request_token, require_auth
 from app.entity_client import create_parcel as em_create_parcel
 from app.sources import FEGA_SIGPAC, get_source
 
@@ -286,6 +286,10 @@ def enclosure_at():
 @sigpac_bp.route('/sigpac/parcels', methods=['POST'])
 @require_auth
 def create_from_enclosures():
+    token = _get_request_token()
+    if not token:
+        # entity-manager only accepts the user's own JWT for this write.
+        return jsonify({'error': 'user_token_required'}), 401
     body = request.get_json(silent=True) or {}
     refs = body.get('references')
     if not isinstance(refs, list):
@@ -329,7 +333,7 @@ def create_from_enclosures():
             'ndviEnabled': True,
             **places,
         }
-        em_id = em_create_parcel(tenant, payload, g.user_id)
+        em_id = em_create_parcel(tenant, payload, g.user_id, bearer_token=token)
         if not em_id:
             return jsonify({'error': 'Failed to create parcel in entity-manager'}), 502
         urn = parcel_urn(em_id)
