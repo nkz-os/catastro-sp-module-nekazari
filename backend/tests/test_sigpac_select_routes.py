@@ -14,7 +14,7 @@ FIXTURE = os.path.join(os.path.dirname(__file__), 'fixtures', 'fega_recinfo_pair
 with open(FIXTURE, encoding='utf-8') as fh:
     RECINFO = json.load(fh)
 A, B, FAR = '31:104:0:0:18:398:1', '31:104:0:0:18:389:1', '31:255:0:0:3:44:1'
-HEADERS = {'X-Tenant-ID': 'tenant-a', 'X-User-ID': 'user-1'}
+HEADERS = {'X-Tenant-ID': 'tenant-a', 'X-User-ID': 'user-1', 'Authorization': 'Bearer user-token'}
 AT = '/api/cadastral-api/sigpac/enclosure-at'
 CREATE = '/api/cadastral-api/sigpac/parcels'
 POINT = {'longitude': -1.7300, 'latitude': 42.4100}
@@ -58,7 +58,8 @@ def env(monkeypatch):
     orion = FakeOrion()
     created = []
 
-    def fake_create(tenant_id, payload, user_id='x'):
+    def fake_create(tenant_id, payload, user_id='x', bearer_token=None):
+        assert bearer_token == 'user-token'     # the user's own token reaches entity-manager
         created.append(payload)
         return f'urn:ngsi-ld:AgriParcel:new{len(created)}'
 
@@ -272,3 +273,12 @@ def test_place_names_is_bounded(monkeypatch):
     start = time.monotonic()
     assert rt._place_names({'type': 'Polygon', 'coordinates': []}) == {}
     assert time.monotonic() - start < 0.5
+
+
+def test_create_without_user_token_is_401_and_creates_nothing(env):
+    client, _, created, _ = env
+    r = client.post(CREATE, json={'references': [A]},
+                    headers={'X-Tenant-ID': 'tenant-a', 'X-User-ID': 'user-1'})
+    assert r.status_code == 401
+    assert r.get_json()['error'] == 'user_token_required'
+    assert created == []
