@@ -91,6 +91,7 @@ export const CadastralMapClickHandler: React.FC = () => {
   const [sigpacBusy, setSigpacBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const clickModeRef = useRef(clickMode);
+  const clickEnabledRef = useRef(isClickEnabled);
   const selectionRef = useRef<EnclosureAt[]>([]);
   const sigpacBusyRef = useRef(false);
   const sigpacEntitiesRef = useRef<Map<string, any>>(new Map());
@@ -134,7 +135,8 @@ export const CadastralMapClickHandler: React.FC = () => {
 
   useEffect(() => {
     clickModeRef.current = clickMode;
-  }, [clickMode]);
+    clickEnabledRef.current = isClickEnabled;
+  }, [clickMode, isClickEnabled]);
 
   useEffect(() => {
     selectionRef.current = selection;
@@ -603,6 +605,8 @@ export const CadastralMapClickHandler: React.FC = () => {
     setSigpacBusy(true);
     try {
       const enclosure = await enclosureAt(longitude, latitude);
+      // The user may have switched mode or turned the click off while waiting.
+      if (clickModeRef.current !== 'sigpac' || !clickEnabledRef.current) return;
       if (selectionRef.current.some((e) => e.reference === enclosure.reference)) {
         setSelection((prev) => prev.filter((e) => e.reference !== enclosure.reference));
       } else {
@@ -631,6 +635,10 @@ export const CadastralMapClickHandler: React.FC = () => {
       });
       setSelection([]);
       setSigpacName('');
+      // Signal host to reload entities, as the cadastral flow does.
+      setTimeout(() => {
+        (viewerContext as any)?.triggerEntityRefresh?.();
+      }, 500);
     } catch (err) {
       const [key, params] = sigpacErrorKey(err);
       setNotification({ type: 'error', message: String(t(key, params)) });

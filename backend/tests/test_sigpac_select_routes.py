@@ -26,8 +26,10 @@ class FakeFega:
     missing: set = set()
     at_point = A
 
+    instances: list = []
+
     def __init__(self, *a, **kw):
-        pass
+        FakeFega.instances.append(kw)
 
     def enclosure_at(self, lon, lat):
         if FakeFega.down:
@@ -52,6 +54,7 @@ class FakeOrion:
 def env(monkeypatch):
     app.config['TESTING'] = True
     FakeFega.down, FakeFega.missing, FakeFega.at_point = False, set(), A
+    FakeFega.instances = []
     orion = FakeOrion()
     created = []
 
@@ -63,11 +66,18 @@ def env(monkeypatch):
 
     def fake_refresh(tenant_id, urn, geometry, **kw):
         refreshes.append((tenant_id, urn))
+        # Same semantics as compute_enclosures: overlapPct is the share of the PARCEL.
         union = shape(geometry)
-        refs = [ref for ref, rec in RECINFO.items()
-                if union.contains(shape(sel.enclosure_summary(rec[0])['geometry']).representative_point())]
-        orion.parcels.append({'id': urn, 'type': 'AgriParcel', 'sigpacEnclosures': {
-            'type': 'Property', 'value': [{'reference': r, 'overlapPct': 100.0} for r in refs]}})
+        parcel_ha = sel.area_ha(geometry)
+        value = []
+        for ref, rec in RECINFO.items():
+            enc = sel.enclosure_summary(rec[0])
+            if union.contains(shape(enc['geometry']).representative_point()):
+                ha = sel.area_ha(enc['geometry'])
+                value.append({'reference': ref, 'overlapAreaHa': ha, 'enclosureAreaHa': rec[0]['superficie'],
+                              'overlapPct': ha / parcel_ha * 100})
+        orion.parcels.append({'id': urn, 'type': 'AgriParcel',
+                              'sigpacEnclosures': {'type': 'Property', 'value': value}})
         return {'status': 'updated', 'enclosures': []}
 
     monkeypatch.setattr(rt.svc, 'FegaClient', FakeFega)
@@ -232,3 +242,33 @@ def test_create_entity_manager_failure_is_502(env, monkeypatch):
     client = env[0]
     monkeypatch.setattr(rt, 'em_create_parcel', lambda *a, **k: None)
     assert post(client, CREATE, {'references': [A]}).status_code == 502
+
+
+def test_create_same_two_enclosures_twice_second_is_409(env):
+    client, _, created, _ = env
+    assert post(client, CREATE, {'references': [A, B]}).status_code == 201
+    r = post(client, CREATE, {'references': [A]})       # the smaller recinto alone
+    assert r.status_code == 409
+    assert len(created) == 1
+
+
+def test_create_with_leading_zeros_is_normalised(env):
+    client, _, created, _ = env
+    assert post(client, CREATE, {'references': [A]}).status_code == 201
+    assert post(client, CREATE, {'references': ['31:104:00:0:018:398:01']}).status_code == 409
+    assert len(created) == 1
+
+
+def test_create_uses_one_fega_budget(env):
+    client = env[0]
+    post(client, CREATE, {'references': [A, B]})
+    assert FakeFega.instances == [{'deadline_s': rt.SIGPAC_CREATE_BUDGET_S}]
+
+
+def test_place_names_is_bounded(monkeypatch):
+    import time
+    monkeypatch.setattr(rt, '_lookup_place_names', lambda geometry: time.sleep(1) or {'municipality': 'x'})
+    monkeypatch.setattr(rt, 'PLACE_NAMES_TIMEOUT_S', 0.1)
+    start = time.monotonic()
+    assert rt._place_names({'type': 'Polygon', 'coordinates': []}) == {}
+    assert time.monotonic() - start < 0.5

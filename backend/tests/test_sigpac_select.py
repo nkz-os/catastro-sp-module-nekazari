@@ -127,3 +127,18 @@ def test_enclosure_by_reference_empty_is_none():
     resp.json.return_value = []
     session.get.return_value = resp
     assert sp.FegaClient(session=session).enclosure_by_reference(A) is None
+
+
+def test_parcels_by_enclosure_uses_share_of_the_enclosure():
+    # overlapPct is the share of the PARCEL; "taken" is about the share of the RECINTO.
+    parcels = [{'id': 'urn:ngsi-ld:AgriParcel:big', 'type': 'AgriParcel', sp.ATTR_NAME: {'type': 'Property', 'value': [
+        {'reference': A, 'overlapPct': 33.0, 'overlapAreaHa': 2.0, 'enclosureAreaHa': 2.0},     # whole recinto
+        {'reference': B, 'overlapPct': 100.0, 'overlapAreaHa': 1.0, 'enclosureAreaHa': 10.0},   # 10 % of it
+    ]}}]
+    assert sel.parcels_by_enclosure(parcels) == {A: 'urn:ngsi-ld:AgriParcel:big'}
+
+
+def test_normalize_reference_drops_leading_zeros():
+    assert sel.normalize_reference('01:001:0:0:018:00398:01') == '1:1:0:0:18:398:1'
+    with pytest.raises(ValueError):
+        sel.normalize_reference('1:2:3')

@@ -200,6 +200,12 @@ def backfill_sigpac():
 # Map click: select recintos and create one parcel from them
 # ---------------------------------------------------------------------------
 
+# One FEGA deadline for the whole creation (lookups + refresh); with the entity-manager
+# timeout this stays under the 120 s gunicorn worker timeout.
+SIGPAC_CREATE_BUDGET_S = 60
+PLACE_NAMES_TIMEOUT_S = 5
+_place_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='sigpac-place')
+
 _tenant_locks: dict[str, threading.Lock] = {}
 _tenant_locks_guard = threading.Lock()
 
@@ -228,7 +234,17 @@ def _tenant_parcels(tenant_id: str) -> list[dict]:
 
 
 def _place_names(geometry: dict) -> dict:
-    """Municipality and province from the Catastro at an interior point; best effort."""
+    """Municipality and province, best effort and bounded: a slow Catastro never blocks creation."""
+    future = _place_executor.submit(_lookup_place_names, geometry)
+    try:
+        return future.result(timeout=PLACE_NAMES_TIMEOUT_S)
+    except Exception as exc:
+        logger.info('sigpac.place_names skipped: %s', type(exc).__name__)
+        return {}
+
+
+def _lookup_place_names(geometry: dict) -> dict:
+    """Municipality and province from the Catastro at an interior point."""
     try:
         from app.catastro_clients import SpanishStateCatastroClient
         point = svc._to_shape(geometry).representative_point()
@@ -274,18 +290,16 @@ def create_from_enclosures():
     refs = body.get('references')
     if not isinstance(refs, list):
         return jsonify({'error': 'invalid_reference'}), 422
-    refs = list(dict.fromkeys(refs))
     if not refs:
         return jsonify({'error': 'empty'}), 422
-    if len(refs) > sel.MAX_ENCLOSURES_PER_PARCEL:
-        return jsonify({'error': 'too_many', 'max': sel.MAX_ENCLOSURES_PER_PARCEL}), 422
     try:
-        for ref in refs:
-            sel.parse_reference(ref)
+        refs = list(dict.fromkeys(sel.normalize_reference(ref) for ref in refs))
     except ValueError:
         return jsonify({'error': 'invalid_reference'}), 422
+    if len(refs) > sel.MAX_ENCLOSURES_PER_PARCEL:
+        return jsonify({'error': 'too_many', 'max': sel.MAX_ENCLOSURES_PER_PARCEL}), 422
 
-    client = svc.FegaClient(deadline_s=REFRESH_DEADLINE_S)
+    client = svc.FegaClient(deadline_s=SIGPAC_CREATE_BUDGET_S)
     try:
         with ThreadPoolExecutor(max_workers=svc.MAX_CONCURRENCY) as pool:
             fetched = list(pool.map(client.enclosure_by_reference, refs))
@@ -300,6 +314,7 @@ def create_from_enclosures():
         return jsonify({'error': 'not_contiguous'}), 422
 
     tenant = g.tenant_id
+    places = _place_names(geometry)     # outside the lock: it only labels the parcel
     with _tenant_lock(tenant):
         taken = sel.parcels_by_enclosure(_tenant_parcels(tenant))
         for ref in refs:
@@ -312,15 +327,14 @@ def create_from_enclosures():
             'category': 'cadastral',
             'area': round(sel.area_ha(geometry), 4),
             'ndviEnabled': True,
-            **_place_names(geometry),
+            **places,
         }
         em_id = em_create_parcel(tenant, payload, g.user_id)
         if not em_id:
             return jsonify({'error': 'Failed to create parcel in entity-manager'}), 502
         urn = parcel_urn(em_id)
         # Written before answering, so the next creation in this tenant sees these recintos.
-        result = svc.refresh_parcel(tenant.lower(), urn, geometry,
-                                    client=svc.FegaClient(deadline_s=REFRESH_DEADLINE_S))
+        result = svc.refresh_parcel(tenant.lower(), urn, geometry, client=client)
     pending = result.get('status') != 'updated'
     if pending:
         trigger_refresh(tenant, urn, geometry)

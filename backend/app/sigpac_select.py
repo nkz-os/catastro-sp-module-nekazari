@@ -19,7 +19,8 @@ from app import sigpac_service as svc
 # Digitisation gaps between neighbouring recintos are closed up to this width.
 GAP_TOLERANCE_M = 0.5
 MAX_ENCLOSURES_PER_PARCEL = 20
-# A recinto counts as already used when an existing parcel covers this share of it.
+# A recinto counts as already used when an existing parcel covers this share OF THE RECINTO.
+# (Stored overlapPct is the share of the parcel, so it is only a fallback when areas are missing.)
 IN_PARCEL_MIN_OVERLAP_PCT = 50.0
 
 _REFERENCE = re.compile(r'^\d{1,2}:\d{1,3}:\d{1,3}:\d{1,3}:\d{1,3}:\d{1,5}:\d{1,5}$')
@@ -35,6 +36,11 @@ def parse_reference(ref: str) -> tuple[int, int, int, int, int, int, int]:
         raise ValueError(f'invalid SIGPAC reference: {ref!r}')
     parts = tuple(int(p) for p in ref.split(':'))
     return parts  # type: ignore[return-value]
+
+
+def normalize_reference(ref: str) -> str:
+    """Canonical form, without leading zeros, as stored in sigpacEnclosures."""
+    return ':'.join(str(p) for p in parse_reference(ref))
 
 
 def enclosure_summary(attrs: dict) -> dict:
@@ -82,10 +88,20 @@ def parcels_by_enclosure(parcels: list[dict]) -> dict[str, str]:
         for enc in svc.read_enclosures(entity) or []:
             if not isinstance(enc, dict):
                 continue
-            ref, pct = enc.get('reference'), enc.get('overlapPct')
-            if ref and urn and isinstance(pct, (int, float)) and pct >= IN_PARCEL_MIN_OVERLAP_PCT:
+            ref = enc.get('reference')
+            share = _enclosure_share_pct(enc)
+            if ref and urn and share is not None and share >= IN_PARCEL_MIN_OVERLAP_PCT:
                 taken.setdefault(ref, urn)
     return taken
+
+
+def _enclosure_share_pct(enc: dict) -> Optional[float]:
+    """Share of the recinto inside the parcel; falls back to overlapPct without areas."""
+    overlap, total = enc.get('overlapAreaHa'), enc.get('enclosureAreaHa')
+    if isinstance(overlap, (int, float)) and isinstance(total, (int, float)) and total > 0:
+        return overlap / total * 100.0
+    pct = enc.get('overlapPct')
+    return float(pct) if isinstance(pct, (int, float)) else None
 
 
 def default_name(references: list[str], name: Optional[str] = None) -> str:
