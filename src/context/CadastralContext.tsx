@@ -1,7 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
+/** What a map click selects: SIGPAC enclosures (default) or the cadastral parcel. */
+export type ClickMode = 'sigpac' | 'cadastral';
+
 interface CadastralContextType {
   isClickEnabled: boolean;
+  clickMode: ClickMode;
+  setClickMode: (mode: ClickMode) => void;
   toggleClickEnabled: () => void;
   setClickEnabled: (enabled: boolean) => void;
 }
@@ -23,11 +28,36 @@ const setGlobalState = (value: boolean) => {
   window.dispatchEvent(new CustomEvent('cadastral-state-changed', { detail: value }));
 };
 
+const GLOBAL_MODE_KEY = '__nekazari_cadastral_mode__';
+
+const getGlobalMode = (): ClickMode => {
+  if (typeof window === 'undefined') return 'sigpac';
+  return (window as any)[GLOBAL_MODE_KEY] === 'cadastral' ? 'cadastral' : 'sigpac';
+};
+
+const setGlobalMode = (mode: ClickMode) => {
+  if (typeof window === 'undefined') return;
+  (window as any)[GLOBAL_MODE_KEY] = mode;
+  window.dispatchEvent(new CustomEvent('cadastral-mode-changed', { detail: mode }));
+};
+
 const CadastralContext = createContext<CadastralContextType | undefined>(undefined);
 
 export const CadastralProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Initialize from global state
   const [isClickEnabled, setIsClickEnabled] = useState(() => getGlobalState());
+  const [clickMode, setClickModeState] = useState<ClickMode>(() => getGlobalMode());
+
+  useEffect(() => {
+    const handleModeChange = (event: CustomEvent) => setClickModeState(event.detail);
+    window.addEventListener('cadastral-mode-changed', handleModeChange as EventListener);
+    return () => window.removeEventListener('cadastral-mode-changed', handleModeChange as EventListener);
+  }, []);
+
+  const setClickMode = (mode: ClickMode) => {
+    setClickModeState(mode);
+    setGlobalMode(mode);
+  };
 
   // Listen for global state changes from other provider instances
   useEffect(() => {
@@ -56,6 +86,8 @@ export const CadastralProvider: React.FC<{ children: ReactNode }> = ({ children 
     <CadastralContext.Provider
       value={{
         isClickEnabled,
+        clickMode,
+        setClickMode,
         toggleClickEnabled,
         setClickEnabled,
       }}

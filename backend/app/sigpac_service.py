@@ -255,6 +255,14 @@ class FegaClient:
             return data[0]
         return None
 
+    def enclosure_by_reference(self, ref: str) -> Optional[dict]:
+        """Attributes (with WKT) of one recinto by its 'pp:mmm:a:z:pol:par:rec' reference."""
+        path = '/'.join(str(int(p)) for p in ref.split(':'))
+        data = self._get_json(f'{self.base_url}/servicioconsultassigpac/query/recinfo/{path}.json')
+        if isinstance(data, list) and data:
+            return data[0]
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Build the attribute value

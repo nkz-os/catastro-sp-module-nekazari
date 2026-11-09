@@ -8,6 +8,28 @@ import { CheckCircle, XCircle, Loader2, Clock } from 'lucide-react';
 import { useCadastral } from '../context/CadastralContext';
 import { CadastralConfirmDialog } from './CadastralConfirmDialog';
 import { CadastralSelectionDialog } from './CadastralSelectionDialog';
+import { SigpacSelectionPanel } from './SigpacSelectionPanel';
+import {
+  enclosureAt,
+  createSigpacParcel,
+  SigpacApiError,
+  type EnclosureAt,
+} from '../services/sigpacApi';
+
+const SIGPAC_ENTITY_PREFIX = 'sigpac-selection:';
+
+/** Error from the SIGPAC routes -> translation key (and its params). */
+const sigpacErrorKey = (err: unknown): [string, Record<string, any>] => {
+  if (err instanceof SigpacApiError) {
+    if (err.status === 404) return ['sigpac.select.noEnclosure', {}];
+    if (err.status === 409) return ['sigpac.select.taken', { ref: err.detail.reference }];
+    if (err.status === 503) return ['sigpac.select.fega', {}];
+    if (err.code === 'outside_coverage') return ['sigpac.select.outside', {}];
+    if (err.code === 'not_contiguous') return ['sigpac.select.notContiguous', {}];
+    if (err.code === 'too_many') return ['sigpac.select.tooMany', { max: err.detail.max }];
+  }
+  return ['sigpac.select.error', {}];
+};
 
 // Error types for specific UX messages
 type ErrorType = 'not_found' | 'timeout' | 'network' | 'service_unavailable' | 'generic';
@@ -63,7 +85,16 @@ export const CadastralMapClickHandler: React.FC = () => {
   const viewerContext = useViewerOptional();
   const cesiumViewer = viewerContext?.cesiumViewer;
   const isViewerReady = viewerContext?.isViewerReady !== false;
-  const { isClickEnabled } = useCadastral();
+  const { isClickEnabled, clickMode } = useCadastral();
+  const [selection, setSelection] = useState<EnclosureAt[]>([]);
+  const [sigpacName, setSigpacName] = useState('');
+  const [sigpacBusy, setSigpacBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const clickModeRef = useRef(clickMode);
+  const clickEnabledRef = useRef(isClickEnabled);
+  const selectionRef = useRef<EnclosureAt[]>([]);
+  const sigpacBusyRef = useRef(false);
+  const sigpacEntitiesRef = useRef<Map<string, any>>(new Map());
   const [isProcessing, setIsProcessing] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [notification, setNotification] = useState<{
@@ -102,6 +133,57 @@ export const CadastralMapClickHandler: React.FC = () => {
     candidatesRef.current = candidates;
   }, [candidates]);
 
+  useEffect(() => {
+    clickModeRef.current = clickMode;
+    clickEnabledRef.current = isClickEnabled;
+  }, [clickMode, isClickEnabled]);
+
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
+
+  // Changing mode or turning the click off drops a half-made SIGPAC selection.
+  useEffect(() => {
+    setSelection([]);
+    setSigpacName('');
+  }, [clickMode, isClickEnabled]);
+
+  // Draw each selected recinto; entities follow the selection.
+  useEffect(() => {
+    // @ts-ignore
+    const Cesium = window.Cesium;
+    if (!cesiumViewer || !Cesium) return;
+    const drawn = sigpacEntitiesRef.current;
+    const wanted = new Set(selection.map((e) => e.reference));
+    for (const [ref, entity] of drawn) {
+      if (!wanted.has(ref)) {
+        cesiumViewer.entities.remove(entity);
+        drawn.delete(ref);
+      }
+    }
+    for (const e of selection) {
+      if (drawn.has(e.reference)) continue;
+      const hierarchy = createCesiumHierarchy(Cesium, e.geometry);
+      if (!hierarchy) continue;
+      const color = e.inParcel ? Cesium.Color.ORANGE : Cesium.Color.LIME;
+      drawn.set(e.reference, cesiumViewer.entities.add({
+        name: `${SIGPAC_ENTITY_PREFIX}${e.reference}`,
+        polygon: {
+          hierarchy,
+          material: color.withAlpha(0.45),
+          height: 0,
+          classificationType: Cesium.ClassificationType.TERRAIN,
+        },
+      }));
+    }
+  }, [cesiumViewer, selection]);
+
+  // Remove the drawn recintos when the component goes away.
+  useEffect(() => () => {
+    const drawn = sigpacEntitiesRef.current;
+    if (cesiumViewer) for (const entity of drawn.values()) cesiumViewer.entities.remove(entity);
+    drawn.clear();
+  }, [cesiumViewer]);
   useEffect(() => {
     console.log('[CadastralMapClickHandler] useEffect triggered', {
       isEntitiesPage,
@@ -154,6 +236,13 @@ export const CadastralMapClickHandler: React.FC = () => {
 
       // Check if clicked on an existing entity
       const pickedObject = cesiumViewer.scene.pick(click.position);
+      const pickedName: string = (Cesium.defined(pickedObject) && pickedObject.id?.name) || '';
+      if (clickModeRef.current === 'sigpac' && pickedName.startsWith(SIGPAC_ENTITY_PREFIX)) {
+        // A second click on a selected recinto removes it.
+        const ref = pickedName.slice(SIGPAC_ENTITY_PREFIX.length);
+        setSelection((prev) => prev.filter((e) => e.reference !== ref));
+        return;
+      }
       if (Cesium.defined(pickedObject) && pickedObject.id) {
         console.log('[CadastralMapClickHandler] Clicked on existing entity, ignoring');
         // Clicked on an entity, don't handle
@@ -177,6 +266,10 @@ export const CadastralMapClickHandler: React.FC = () => {
       console.log('[CadastralMapClickHandler] Map clicked at:', { longitude, latitude });
 
       // Process the click
+      if (clickModeRef.current === 'sigpac') {
+        await handleSigpacClick(longitude, latitude);
+        return;
+      }
       await handleMapClick(longitude, latitude);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
@@ -506,6 +599,60 @@ export const CadastralMapClickHandler: React.FC = () => {
     }
   };
 
+  const handleSigpacClick = async (longitude: number, latitude: number) => {
+    if (sigpacBusyRef.current) return;
+    sigpacBusyRef.current = true;
+    setSigpacBusy(true);
+    try {
+      const enclosure = await enclosureAt(longitude, latitude);
+      // The user may have switched mode or turned the click off while waiting.
+      if (clickModeRef.current !== 'sigpac' || !clickEnabledRef.current) return;
+      if (selectionRef.current.some((e) => e.reference === enclosure.reference)) {
+        setSelection((prev) => prev.filter((e) => e.reference !== enclosure.reference));
+      } else {
+        setSelection((prev) => [...prev, enclosure]);
+      }
+    } catch (err) {
+      const [key, params] = sigpacErrorKey(err);
+      setNotification({ type: 'warning', message: String(t(key, params)) });
+      clearNotificationAfterDelay();
+    } finally {
+      sigpacBusyRef.current = false;
+      setSigpacBusy(false);
+    }
+  };
+
+  const handleCreateSigpacParcel = async () => {
+    const refs = selection.map((e) => e.reference);
+    if (refs.length === 0) return;
+    setCreating(true);
+    try {
+      const result = await createSigpacParcel(refs, sigpacName.trim() || undefined);
+      const name = sigpacName.trim() || refs[0] + (refs.length > 1 ? ` +${refs.length - 1}` : '');
+      setNotification({
+        type: 'success',
+        message: result.sigpacPending ? t('sigpac.select.pending') : t('sigpac.select.created', { name }),
+      });
+      setSelection([]);
+      setSigpacName('');
+      // Signal host to reload entities, as the cadastral flow does.
+      setTimeout(() => {
+        (viewerContext as any)?.triggerEntityRefresh?.();
+      }, 500);
+    } catch (err) {
+      const [key, params] = sigpacErrorKey(err);
+      setNotification({ type: 'error', message: String(t(key, params)) });
+    } finally {
+      setCreating(false);
+      clearNotificationAfterDelay();
+    }
+  };
+
+  const handleCancelSigpac = () => {
+    setSelection([]);
+    setSigpacName('');
+  };
+
   const handleCancelParcel = () => {
     pendingParcelRef.current = null;
     processingRef.current = false;
@@ -534,6 +681,27 @@ export const CadastralMapClickHandler: React.FC = () => {
             )}
           </div>
         </div>
+      )}
+
+      {/* SIGPAC lookup in progress */}
+      {sigpacBusy && (
+        <div className="fixed top-4 right-4 z-50 bg-white rounded-lg shadow-lg border border-gray-200 p-4 flex items-center gap-3">
+          <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+          <span className="text-sm text-gray-700">{t('sigpac.select.querying')}</span>
+        </div>
+      )}
+
+      {/* SIGPAC selection */}
+      {clickMode === 'sigpac' && selection.length > 0 && (
+        <SigpacSelectionPanel
+          selection={selection}
+          name={sigpacName}
+          onNameChange={setSigpacName}
+          onRemove={(ref) => setSelection((prev) => prev.filter((e) => e.reference !== ref))}
+          onCreate={handleCreateSigpacParcel}
+          onCancel={handleCancelSigpac}
+          creating={creating}
+        />
       )}
 
       {/* Selection Dialog */}

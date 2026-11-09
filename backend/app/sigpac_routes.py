@@ -15,9 +15,12 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any, Optional
 
 from flask import Blueprint, g, jsonify, request
+from shapely.geometry import box, mapping
 
+from app import sigpac_select as sel
 from app import sigpac_service as svc
 from app.auth_middleware import require_auth
+from app.entity_client import create_parcel as em_create_parcel
 from app.sources import FEGA_SIGPAC, get_source
 
 logger = logging.getLogger(__name__)
@@ -191,6 +194,152 @@ def backfill_sigpac():
         return jsonify({'error': 'tenant_id required'}), 400
     _backfill_executor.submit(backfill_job, tenant_id, bool(body.get('force')))
     return jsonify({'status': 'accepted', 'tenant_id': tenant_id}), 202
+
+
+# ---------------------------------------------------------------------------
+# Map click: select recintos and create one parcel from them
+# ---------------------------------------------------------------------------
+
+# One FEGA deadline for the whole creation (lookups + refresh); with the entity-manager
+# timeout this stays under the 120 s gunicorn worker timeout.
+SIGPAC_CREATE_BUDGET_S = 60
+PLACE_NAMES_TIMEOUT_S = 5
+_place_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='sigpac-place')
+
+_tenant_locks: dict[str, threading.Lock] = {}
+_tenant_locks_guard = threading.Lock()
+
+
+def _tenant_lock(tenant_id: str) -> threading.Lock:
+    """Serialises check-then-create per tenant (one replica: an in-process lock suffices)."""
+    with _tenant_locks_guard:
+        return _tenant_locks.setdefault(tenant_id.lower(), threading.Lock())
+
+
+def _orion_for(tenant_id: str) -> Any:
+    from app.orion_client import get_orion_client
+    return get_orion_client(tenant_id)
+
+
+def _tenant_parcels(tenant_id: str) -> list[dict]:
+    orion = _orion_for(tenant_id)
+    parcels: list[dict] = []
+    offset = 0
+    while True:
+        page = orion.query_entities(type='AgriParcel', limit=_BACKFILL_PAGE, offset=offset)
+        parcels.extend(page)
+        if len(page) < _BACKFILL_PAGE:
+            return parcels
+        offset += _BACKFILL_PAGE
+
+
+def _place_names(geometry: dict) -> dict:
+    """Municipality and province, best effort and bounded: a slow Catastro never blocks creation."""
+    future = _place_executor.submit(_lookup_place_names, geometry)
+    try:
+        return future.result(timeout=PLACE_NAMES_TIMEOUT_S)
+    except Exception as exc:
+        logger.info('sigpac.place_names skipped: %s', type(exc).__name__)
+        return {}
+
+
+def _lookup_place_names(geometry: dict) -> dict:
+    """Municipality and province from the Catastro at an interior point."""
+    try:
+        from app.catastro_clients import SpanishStateCatastroClient
+        point = svc._to_shape(geometry).representative_point()
+        data = SpanishStateCatastroClient().query_by_coordinates(point.x, point.y, '4326') or {}
+    except Exception as exc:
+        logger.info('sigpac.place_names unavailable: %s', type(exc).__name__)
+        return {}
+    return {k: data[k] for k in ('municipality', 'province')
+            if isinstance(data.get(k), str) and data[k].strip()}
+
+
+def _fega_unavailable():
+    return jsonify({'error': 'SIGPAC lookup failed', 'source': 'fega'}), 503
+
+
+@sigpac_bp.route('/sigpac/enclosure-at', methods=['POST'])
+@require_auth
+def enclosure_at():
+    body = request.get_json(silent=True) or {}
+    try:
+        lon, lat = float(body['longitude']), float(body['latitude'])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'error': 'longitude and latitude are required numbers'}), 400
+    # is_in_spain takes an area: a box of about 1 m around the point.
+    if not svc.is_in_spain(mapping(box(lon - 1e-5, lat - 1e-5, lon + 1e-5, lat + 1e-5))):
+        return jsonify({'error': 'outside_coverage'}), 422
+    try:
+        attrs = svc.FegaClient(deadline_s=REFRESH_DEADLINE_S).enclosure_at(lon, lat)
+    except svc.FegaError:
+        return _fega_unavailable()
+    if not attrs:
+        return jsonify({'error': 'no_enclosure'}), 404
+    summary = sel.enclosure_summary(attrs)
+    taken = sel.parcels_by_enclosure(_tenant_parcels(g.tenant_id))
+    summary['inParcel'] = taken.get(summary['reference'])
+    return jsonify(summary), 200
+
+
+@sigpac_bp.route('/sigpac/parcels', methods=['POST'])
+@require_auth
+def create_from_enclosures():
+    body = request.get_json(silent=True) or {}
+    refs = body.get('references')
+    if not isinstance(refs, list):
+        return jsonify({'error': 'invalid_reference'}), 422
+    if not refs:
+        return jsonify({'error': 'empty'}), 422
+    try:
+        refs = list(dict.fromkeys(sel.normalize_reference(ref) for ref in refs))
+    except ValueError:
+        return jsonify({'error': 'invalid_reference'}), 422
+    if len(refs) > sel.MAX_ENCLOSURES_PER_PARCEL:
+        return jsonify({'error': 'too_many', 'max': sel.MAX_ENCLOSURES_PER_PARCEL}), 422
+
+    client = svc.FegaClient(deadline_s=SIGPAC_CREATE_BUDGET_S)
+    try:
+        with ThreadPoolExecutor(max_workers=svc.MAX_CONCURRENCY) as pool:
+            fetched = list(pool.map(client.enclosure_by_reference, refs))
+    except svc.FegaError:
+        return _fega_unavailable()
+    missing = [ref for ref, attrs in zip(refs, fetched) if not attrs]
+    if missing:
+        return jsonify({'error': 'invalid_reference', 'reference': missing[0]}), 422
+    try:
+        geometry = sel.union_enclosures([sel.enclosure_summary(a)['geometry'] for a in fetched])
+    except sel.NotContiguous:
+        return jsonify({'error': 'not_contiguous'}), 422
+
+    tenant = g.tenant_id
+    places = _place_names(geometry)     # outside the lock: it only labels the parcel
+    with _tenant_lock(tenant):
+        taken = sel.parcels_by_enclosure(_tenant_parcels(tenant))
+        for ref in refs:
+            if ref in taken:
+                return jsonify({'error': 'enclosure_in_parcel', 'reference': ref,
+                                'parcel': taken[ref]}), 409
+        payload = {
+            'geometry': geometry,
+            'name': sel.default_name(refs, body.get('name') if isinstance(body.get('name'), str) else None),
+            'category': 'cadastral',
+            'area': round(sel.area_ha(geometry), 4),
+            'ndviEnabled': True,
+            **places,
+        }
+        em_id = em_create_parcel(tenant, payload, g.user_id)
+        if not em_id:
+            return jsonify({'error': 'Failed to create parcel in entity-manager'}), 502
+        urn = parcel_urn(em_id)
+        # Written before answering, so the next creation in this tenant sees these recintos.
+        result = svc.refresh_parcel(tenant.lower(), urn, geometry, client=client)
+    pending = result.get('status') != 'updated'
+    if pending:
+        trigger_refresh(tenant, urn, geometry)
+    svc._log('create', tenant=tenant, parcel=urn, enclosures=len(refs), pending=pending)
+    return jsonify({'id': urn, 'sigpacPending': pending}), 201
 
 
 # ---------------------------------------------------------------------------
