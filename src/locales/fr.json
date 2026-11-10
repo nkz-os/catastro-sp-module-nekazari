@@ -18,6 +18,7 @@
       "hint": "Cliquez sur d’autres îlots contigus pour les réunir ; un second clic retire un îlot.",
       "total": "Total : {{ha}} ha",
       "name": "Nom de la parcelle",
+      "namePlaceholder": "Saisissez un nom pour la parcelle",
       "create": "Créer la parcelle",
       "creating": "Création…",
       "cancel": "Annuler",

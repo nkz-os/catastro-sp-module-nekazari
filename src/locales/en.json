@@ -89,6 +89,7 @@
       "hint": "Click other adjacent enclosures to join them; a second click removes an enclosure.",
       "total": "Total: {{ha}} ha",
       "name": "Parcel name",
+      "namePlaceholder": "Type a name for the parcel",
       "create": "Create parcel",
       "creating": "Creating…",
       "cancel": "Cancel",

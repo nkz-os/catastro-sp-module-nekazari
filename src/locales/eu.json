@@ -18,6 +18,7 @@
       "hint": "Egin klik ondoko beste barruti batzuetan elkartzeko; bigarren klik batek barrutia kentzen du.",
       "total": "Guztira: {{ha}} ha",
       "name": "Lurzatiaren izena",
+      "namePlaceholder": "Idatzi lursailaren izena",
       "create": "Sortu lurzatia",
       "creating": "Sortzen…",
       "cancel": "Utzi",

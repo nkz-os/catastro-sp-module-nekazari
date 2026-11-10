@@ -18,6 +18,7 @@
       "hint": "Fes clic en altres recintes contigus per ajuntar-los; un segon clic treu un recinte.",
       "total": "Total: {{ha}} ha",
       "name": "Nom de la parcel·la",
+      "namePlaceholder": "Escriu un nom per a la parcel·la",
       "create": "Crear parcel·la",
       "creating": "Creant…",
       "cancel": "Cancel·lar",

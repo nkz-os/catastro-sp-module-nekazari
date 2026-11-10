@@ -30,13 +30,22 @@ export const SigpacSelectionPanel: React.FC<Props> = ({
     code ? t(`sigpac.uses.${code}`, { defaultValue: code }) : '-';
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-96 max-w-full">
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-nkz-modal w-96 max-w-full shadow-2xl">
       <Panel variant="solid">
         <Panel.Header>
           <Panel.Title>{t('sigpac.select.title')}</Panel.Title>
         </Panel.Header>
         <Panel.Body>
           <div className="space-y-2 text-nkz-sm text-nkz-text-secondary">
+            <label className="block">
+              <span className="block mb-1 font-medium">{t('sigpac.select.name')}</span>
+              <Input
+                autoFocus
+                value={name}
+                onChange={(ev) => onNameChange(ev.target.value)}
+                placeholder={t('sigpac.select.namePlaceholder')}
+              />
+            </label>
             <p className="text-nkz-text-muted">{t('sigpac.select.hint')}</p>
             <ul className="max-h-64 overflow-y-auto space-y-2">
               {selection.map((e) => (
@@ -58,10 +67,6 @@ export const SigpacSelectionPanel: React.FC<Props> = ({
               ))}
             </ul>
             <div className="font-medium">{t('sigpac.select.total', { ha: total.toFixed(2) })}</div>
-            <label className="block">
-              <span className="block mb-1">{t('sigpac.select.name')}</span>
-              <Input value={name} onChange={(ev) => onNameChange(ev.target.value)} placeholder={selection[0]?.reference} />
-            </label>
             {blocked && <p className="text-nkz-danger">{t('sigpac.select.blocked')}</p>}
             <p className="text-nkz-text-muted">{t('sigpac.attribution')}</p>
           </div>

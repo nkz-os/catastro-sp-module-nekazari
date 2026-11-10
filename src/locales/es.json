@@ -89,6 +89,7 @@
       "hint": "Haz clic en otros recintos contiguos para juntarlos; un segundo clic quita un recinto.",
       "total": "Total: {{ha}} ha",
       "name": "Nombre de la parcela",
+      "namePlaceholder": "Escribe un nombre para la parcela",
       "create": "Crear parcela",
       "creating": "Creando…",
       "cancel": "Cancelar",

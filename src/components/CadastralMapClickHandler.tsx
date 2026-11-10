@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
 import { useViewerOptional } from '@nekazari/sdk';
 import { useTranslation } from '@nekazari/sdk';
@@ -664,7 +665,8 @@ export const CadastralMapClickHandler: React.FC = () => {
     return null;
   }
 
-  return (
+  // Rendered on <body>: the map-layer slot sits in a low stacking context, under the side rails.
+  return createPortal(
     <>
       {/* Processing indicator with elapsed time */}
       {isProcessing && !pendingParcel && (
@@ -749,7 +751,8 @@ export const CadastralMapClickHandler: React.FC = () => {
           </span>
         </div>
       )}
-    </>
+    </>,
+    document.body,
   );
 };
 
