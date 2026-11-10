@@ -1,5 +1,5 @@
 import React from 'react';
-import { useTranslation } from 'react-i18next';
+import { useTranslation } from '@nekazari/sdk';
 import { SlotShellCompact } from '@nekazari/viewer-kit';
 import { Button } from '@nekazari/ui-kit';
 import { MapPin, MapPinOff } from 'lucide-react';
