@@ -2928,9 +2928,7 @@ class EuskadiCatastroClient:
                                     if 'typeName' in params: del params['typeName']
 
                                 logger.info(f"Trying Euskadi WFS ({bbox_desc}) v{wfs_version}: URL={wfs_url}, type={feature_type}")
-                                # Use verify=False for Bizkaia to avoid SSL errors with intermediate certs
-                                verify_ssl = "bizkaia" not in wfs_url
-                                response = self.session.get(wfs_url, params=params, timeout=15, verify=verify_ssl)
+                                response = self.session.get(wfs_url, params=params, timeout=15)
                                 
                                 # Log response status for debugging
                                 logger.debug(f"Euskadi WFS v{wfs_version} response status: {response.status_code}")
@@ -2952,7 +2950,7 @@ class EuskadiCatastroClient:
                                                  logger.warning(f"Server returned 200 OK but with ExceptionReport for outputFormat at {wfs_url}. Retrying without outputFormat...")
                                                  if 'outputFormat' in params:
                                                      del params['outputFormat']
-                                                 response = self.session.get(wfs_url, params=params, timeout=15, verify=verify_ssl)
+                                                 response = self.session.get(wfs_url, params=params, timeout=15)
                                                  if response.status_code == 200:
                                                      feature = self._parse_wfs_xml_response(response.content)
                                                      if feature:
@@ -2984,7 +2982,7 @@ class EuskadiCatastroClient:
                                     logger.warning(f"Server rejected outputFormat=json at {wfs_url}, retrying with default (XML)...")
                                     if 'outputFormat' in params:
                                         del params['outputFormat']
-                                    response = self.session.get(wfs_url, params=params, timeout=15, verify=verify_ssl)
+                                    response = self.session.get(wfs_url, params=params, timeout=15)
                                     if response.status_code == 200:
                                          feature = self._parse_wfs_xml_response(response.content)
                                          if feature:
